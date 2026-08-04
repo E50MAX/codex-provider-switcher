@@ -1,0 +1,14 @@
+node_modules/
+dist/
+*.vsix
+*.log
+.env
+.env.*
+.codex/
+auth.json
+config.toml
+*.dpapi
+*.key
+*.pem
+*.pfx
+*.p12

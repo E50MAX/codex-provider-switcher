@@ -1,0 +1,120 @@
+{
+  "name": "codex-provider-switcher",
+  "displayName": "Secure Codex Provider Switcher (Unofficial)",
+  "description": "在保留 ChatGPT 登录的同时，安全切换 Codex 到自定义 HTTPS Responses API。",
+  "version": "2.0.0",
+  "publisher": "e50max",
+  "author": {
+    "name": "E50MAX"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/E50MAX/codex-provider-switcher.git"
+  },
+  "homepage": "https://github.com/E50MAX/codex-provider-switcher#readme",
+  "bugs": {
+    "url": "https://github.com/E50MAX/codex-provider-switcher/issues"
+  },
+  "license": "MIT",
+  "pricing": "Free",
+  "preview": true,
+  "engines": {
+    "vscode": "^1.96.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "codex",
+    "provider",
+    "api",
+    "responses api",
+    "openai compatible",
+    "switcher",
+    "security"
+  ],
+  "main": "./extension.js",
+  "extensionKind": [
+    "ui"
+  ],
+  "extensionDependencies": [
+    "openai.chatgpt"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true
+    },
+    "virtualWorkspaces": {
+      "supported": true
+    }
+  },
+  "activationEvents": [
+    "onStartupFinished",
+    "onCommand:labCodex.switchConnection",
+    "onCommand:labCodex.configureLab",
+    "onCommand:labCodex.useAccount",
+    "onCommand:labCodex.useLab",
+    "onCommand:labCodex.deleteLabKey"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "labCodex.switchConnection",
+        "title": "Codex: 切换账户 / 自定义 API",
+        "icon": "$(arrow-swap)"
+      },
+      {
+        "command": "labCodex.configureLab",
+        "title": "Codex: 配置自定义 API",
+        "icon": "$(settings-gear)"
+      },
+      {
+        "command": "labCodex.useAccount",
+        "title": "Codex: 使用 ChatGPT 账户",
+        "icon": "$(account)"
+      },
+      {
+        "command": "labCodex.useLab",
+        "title": "Codex: 使用自定义 API",
+        "icon": "$(server-process)"
+      },
+      {
+        "command": "labCodex.deleteLabKey",
+        "title": "Codex: 删除本机自定义 API Key",
+        "icon": "$(trash)"
+      }
+    ],
+    "configuration": {
+      "title": "Secure Codex Provider Switcher",
+      "properties": {
+        "labCodex.autoReload": {
+          "type": "boolean",
+          "default": true,
+          "description": "切换 provider 后自动重载 VS Code 窗口，使新连接立即生效。"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "lint": "node --check extension.js && node --check lib/validation.js && node --check tools/audit-source.mjs",
+    "test": "node --test",
+    "audit": "node tools/audit-source.mjs",
+    "verify": "npm run lint && npm test && npm run audit",
+    "vscode:prepublish": "npm run verify",
+    "package": "node -e \"require('fs').mkdirSync('dist',{recursive:true})\" && vsce package --out dist/codex-provider-switcher.vsix"
+  },
+  "files": [
+    "extension.js",
+    "lib/**",
+    "scripts/get-secret.ps1",
+    "scripts/save-secret.ps1",
+    "README.md",
+    "SECURITY.md",
+    "PRIVACY.md",
+    "CHANGELOG.md",
+    "LICENSE.txt"
+  ],
+  "devDependencies": {
+    "@vscode/vsce": "3.9.2"
+  }
+}
