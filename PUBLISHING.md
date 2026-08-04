@@ -25,7 +25,21 @@ Inspect the generated VSIX before upload. It must contain only the files listed 
 
 Publish the extension through Visual Studio Marketplace so VS Code can verify the Marketplace signature and deliver updates. Keep the source repository public for review. A GitHub release may mirror the VSIX, but users should prefer the Marketplace build.
 
-For the first release, manual upload through the Marketplace publisher management page avoids putting a long-lived publishing credential on a development machine. If automated publishing is added later, follow the current official VS Code guidance and use a narrowly scoped secret or Microsoft Entra ID. Never commit publishing credentials.
+For the first release, manual upload through the Marketplace publisher management page avoids putting a long-lived publishing credential on a development machine.
+
+## Secure one-command Marketplace updates
+
+After building the reviewed VSIX, run:
+
+```powershell
+npm run publish:marketplace -- .\dist\codex-provider-switcher.vsix
+```
+
+The command opens the official Microsoft sign-in page and uses an Entra access token protected by the browser authorization-code flow with PKCE. The short-lived token is passed to `vsce` only through the child process environment and is not written to the repository, a configuration file, or command-line arguments.
+
+Use the same Microsoft account that owns the Marketplace publisher. The `verify-pat` success text printed by `vsce` is legacy wording; this command supplies an Entra access token rather than a PAT.
+
+For fully unattended CI publishing, follow the [current official VS Code guidance](https://code.visualstudio.com/api/working-with-extensions/publishing-extension#secure-automated-publishing-to-visual-studio-marketplace) and configure Microsoft Entra workload identity federation. Do not fall back to a long-lived Marketplace PAT in a repository secret.
 
 ## Account hardening
 

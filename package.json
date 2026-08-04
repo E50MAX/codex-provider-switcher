@@ -102,12 +102,13 @@
     }
   },
   "scripts": {
-    "lint": "node --check extension.js && node --check lib/validation.js && node --check tools/audit-source.mjs",
+    "lint": "node --check extension.js && node --check lib/validation.js && node --check tools/audit-source.mjs && node --check tools/publish-marketplace.mjs",
     "test": "node --test",
     "audit": "node tools/audit-source.mjs",
     "verify": "npm run lint && npm test && npm run audit",
     "vscode:prepublish": "npm run verify",
-    "package": "node -e \"require('fs').mkdirSync('dist',{recursive:true})\" && vsce package --out dist/codex-provider-switcher.vsix"
+    "package": "node -e \"require('fs').mkdirSync('dist',{recursive:true})\" && vsce package --out dist/codex-provider-switcher.vsix",
+    "publish:marketplace": "node tools/publish-marketplace.mjs"
   },
   "files": [
     "extension.js",
@@ -121,6 +122,7 @@
     "LICENSE.txt"
   ],
   "devDependencies": {
+    "@azure/identity": "4.13.1",
     "@vscode/vsce": "3.9.2"
   }
 }
