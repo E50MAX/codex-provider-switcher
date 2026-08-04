@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.1
+
+- Added an explicit reasoning-effort picker with `ultra`, `max`, `xhigh`, `high`, `medium`, `low`, and `minimal` presets.
+- Added a command to change and persist reasoning effort for both ChatGPT-account and custom-API modes.
+- Displayed the active reasoning effort in the status-bar tooltip.
+
 ## 2.0.0
 
 - Removed all hard-coded provider addresses and HTTP headers.

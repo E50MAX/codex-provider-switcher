@@ -7,6 +7,12 @@
 
 本扩展不是 OpenAI 官方产品，也不隶属于 OpenAI。
 
+从 [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=e50max.codex-provider-switcher) 安装：
+
+```powershell
+code --install-extension e50max.codex-provider-switcher
+```
+
 ## 安全设计
 
 - **无内置服务商**：安装包不包含任何真实 API 地址、请求头、账号或密钥。
@@ -26,8 +32,10 @@ Marketplace 版本应由 Visual Studio Marketplace 签名。不要关闭 VS Code
 1. 安装官方 OpenAI Codex 扩展并登录 ChatGPT。
 2. 运行 `Codex: 配置自定义 API`。
 3. 输入可信的 HTTPS Base URL、模型 ID 和 API Key。
-4. 仔细核对确认框中的主机名。
+4. 选择服务方支持的推理等级，并仔细核对确认框中的主机名。
 5. 运行 `Codex: 切换账户 / 自定义 API`。
+
+也可以随时运行 `Codex: 设置推理等级（含 Ultra）`。可选预设为 `minimal`、`low`、`medium`、`high`、`xhigh`、`max` 和 `ultra`；其中 `ultra` 是最深推理档位，但只有明确支持它的模型和 API 服务才能使用。更高档位通常会增加响应时间和 token 消耗。
 
 切换器只管理自己的配置区块，并保留 ChatGPT 登录。API Key 不写入 `config.toml`。
 

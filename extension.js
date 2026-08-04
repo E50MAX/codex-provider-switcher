@@ -6,6 +6,7 @@ const path = require('path');
 const os = require('os');
 const { spawn } = require('child_process');
 const {
+  REASONING_EFFORT_PRESETS,
   normalizeApiKey,
   normalizeHeaderMap,
   normalizeHttpsBaseUrl,
@@ -18,6 +19,15 @@ const MANAGED_BEGIN = '# >>> codex-provider-switcher: lab_relay >>>';
 const MANAGED_END = '# <<< codex-provider-switcher: lab_relay <<<';
 const DEFAULT_PROVIDER_NAME = 'Custom Responses API';
 const DEFAULT_REASONING_EFFORT = 'max';
+const REASONING_EFFORT_DESCRIPTIONS = Object.freeze({
+  ultra: '最深推理；仅在模型支持时使用',
+  max: '极高推理；仅在模型支持时使用',
+  xhigh: '超高推理；仅在模型支持时使用',
+  high: '适合复杂逻辑、审查和边界情况',
+  medium: '质量、速度与消耗较均衡',
+  low: '适合直接任务，响应更快',
+  minimal: '最低推理；仅在模型支持时使用'
+});
 const MAX_SETTINGS_BYTES = 1024 * 1024;
 const MAX_POWERSHELL_OUTPUT_BYTES = 64 * 1024;
 const POWERSHELL_TIMEOUT_MS = 15000;
@@ -469,6 +479,37 @@ async function promptAndSaveSecret(context, baseUrl, canKeepExisting) {
   return true;
 }
 
+async function selectReasoningEffort(existingEffort) {
+  let currentEffort = DEFAULT_REASONING_EFFORT;
+  try {
+    currentEffort = normalizeReasoningEffort(existingEffort) || DEFAULT_REASONING_EFFORT;
+  } catch {
+    currentEffort = DEFAULT_REASONING_EFFORT;
+  }
+
+  const presetValues = [...REASONING_EFFORT_PRESETS].reverse();
+  const items = presetValues.map((effort) => ({
+    label: effort === 'ultra' ? '$(star-full) ultra' : effort,
+    description: `${effort === currentEffort ? '当前 · ' : ''}${REASONING_EFFORT_DESCRIPTIONS[effort]}`,
+    effort
+  }));
+  if (!presetValues.includes(currentEffort)) {
+    items.unshift({
+      label: currentEffort,
+      description: '当前配置中的自定义档位',
+      effort: currentEffort
+    });
+  }
+
+  const selected = await vscode.window.showQuickPick(items, {
+    title: '设置 Codex 推理等级',
+    placeHolder: '档位必须由当前模型和 API 服务支持',
+    ignoreFocusOut: true,
+    matchOnDescription: true
+  });
+  return selected?.effort;
+}
+
 async function configureCustomApi(context) {
   assertWindows();
   const settings = await readSettings(context);
@@ -523,6 +564,11 @@ async function configureCustomApi(context) {
   }
   const model = normalizeModelId(modelInput);
 
+  const modelReasoningEffort = await selectReasoningEffort(existing.modelReasoningEffort);
+  if (!modelReasoningEffort) {
+    return undefined;
+  }
+
   const hasBoundSecret = await secretExists(context);
   const canKeepExisting = hasBoundSecret && baseUrl === existingBaseUrl;
   if (!(await promptAndSaveSecret(context, baseUrl, canKeepExisting))) {
@@ -534,7 +580,7 @@ async function configureCustomApi(context) {
     baseUrl,
     model,
     reviewModel: model,
-    modelReasoningEffort: normalizeReasoningEffort(existing.modelReasoningEffort) || DEFAULT_REASONING_EFFORT,
+    modelReasoningEffort,
     httpHeaders: normalizeHeaderMap(existing.httpHeaders)
   };
 
@@ -607,20 +653,67 @@ async function useAccount(context) {
   await reloadAfterSwitch('ChatGPT 账户');
 }
 
-async function reloadAfterSwitch(label) {
+async function reloadAfterChange(message) {
   const autoReload = vscode.workspace.getConfiguration('labCodex').get('autoReload', true);
   if (autoReload) {
-    vscode.window.setStatusBarMessage(`Codex 已切换到 ${label}，正在重载窗口…`, 1500);
+    vscode.window.setStatusBarMessage(`${message}，正在重载窗口…`, 1500);
     setTimeout(() => {
       vscode.commands.executeCommand('workbench.action.reloadWindow');
     }, 500);
     return;
   }
 
-  const action = await vscode.window.showInformationMessage(`Codex 已切换到 ${label}。重载窗口后生效。`, '立即重载');
+  const action = await vscode.window.showInformationMessage(`${message}。重载窗口后生效。`, '立即重载');
   if (action === '立即重载') {
     await vscode.commands.executeCommand('workbench.action.reloadWindow');
   }
+}
+
+async function reloadAfterSwitch(label) {
+  await reloadAfterChange(`Codex 已切换到 ${label}`);
+}
+
+async function setReasoningEffort(context) {
+  const configText = await readConfig(context);
+  const provider = topLevelValue(configText, 'model_provider') || 'openai';
+  if (provider !== 'openai' && provider !== PROVIDER_ID) {
+    throw new Error('当前模型服务商不受本切换器管理，已拒绝改写推理等级');
+  }
+
+  const currentEffort = normalizeReasoningEffort(topLevelValue(configText, 'model_reasoning_effort'))
+    || DEFAULT_REASONING_EFFORT;
+  const selectedEffort = await selectReasoningEffort(currentEffort);
+  if (!selectedEffort) {
+    return;
+  }
+  if (selectedEffort === currentEffort) {
+    await vscode.window.showInformationMessage(`Codex 推理等级已经是 ${selectedEffort}。`);
+    return;
+  }
+
+  const settings = await readSettings(context);
+  await rememberActiveMode(context, configText, settings);
+  const updatedSettings = await readSettings(context);
+  if (provider === 'openai') {
+    updatedSettings.account = {
+      ...(updatedSettings.account || accountSnapshot(configText)),
+      modelReasoningEffort: selectedEffort
+    };
+  } else {
+    if (!updatedSettings.lab) {
+      throw new Error('请先配置自定义 API');
+    }
+    updatedSettings.lab = {
+      ...customSnapshot(configText, updatedSettings.lab),
+      modelReasoningEffort: selectedEffort
+    };
+  }
+  await writeSettings(context, updatedSettings);
+
+  const nextConfig = setTopLevelValue(configText, 'model_reasoning_effort', selectedEffort);
+  await backupAndWriteConfig(context, configText, nextConfig);
+  await updateStatus(context);
+  await reloadAfterChange(`Codex 推理等级已设置为 ${selectedEffort}`);
 }
 
 async function switchConnection(context) {
@@ -641,6 +734,11 @@ async function switchConnection(context) {
       label: '$(settings-gear) 配置自定义 API',
       description: '设置 HTTPS Base URL、模型 ID 和加密密钥',
       target: 'configure'
+    },
+    {
+      label: '$(dashboard) 设置推理等级',
+      description: '包含 ultra、max、xhigh、high、medium、low 和 minimal',
+      target: 'reasoning'
     }
   ], {
     title: '切换 Codex 连接',
@@ -655,6 +753,8 @@ async function switchConnection(context) {
     await useAccount(context);
   } else if (selected.target === 'custom') {
     await useCustomApi(context);
+  } else if (selected.target === 'reasoning') {
+    await setReasoningEffort(context);
   } else {
     await configureCustomApi(context);
     await updateStatus(context);
@@ -681,14 +781,16 @@ async function updateStatus(context) {
   try {
     const configText = await readConfig(context);
     const current = topLevelValue(configText, 'model_provider') || 'openai';
+    const reasoningEffort = normalizeReasoningEffort(topLevelValue(configText, 'model_reasoning_effort'));
+    const reasoningLabel = reasoningEffort ? `推理等级：${reasoningEffort}。` : '';
     if (current === PROVIDER_ID) {
       statusBarItem.text = '$(server-process) Codex: 自定义 API';
       statusBarItem.tooltip = await secretExists(context)
-        ? '当前使用自定义 HTTPS Responses API。点击切换连接。'
-        : '当前使用自定义 API，但需要重新输入 API Key。';
+        ? `当前使用自定义 HTTPS Responses API。${reasoningLabel}点击切换连接。`
+        : `当前使用自定义 API，但需要重新输入 API Key。${reasoningLabel}`;
     } else {
       statusBarItem.text = '$(account) Codex: ChatGPT 账户';
-      statusBarItem.tooltip = '当前使用 ChatGPT 账户。点击切换连接。';
+      statusBarItem.tooltip = `当前使用 ChatGPT 账户。${reasoningLabel}点击切换连接。`;
     }
   } catch (error) {
     statusBarItem.text = '$(warning) Codex: 连接配置错误';
@@ -738,6 +840,7 @@ async function activate(context) {
   registerSafeCommand(context, 'labCodex.configureLab', () => configureCustomApi(context));
   registerSafeCommand(context, 'labCodex.useAccount', () => useAccount(context));
   registerSafeCommand(context, 'labCodex.useLab', () => useCustomApi(context));
+  registerSafeCommand(context, 'labCodex.setReasoningEffort', () => setReasoningEffort(context));
   registerSafeCommand(context, 'labCodex.deleteLabKey', () => deleteCustomApiKey(context));
 
   if (await legacySecretExists(context) && !(await secretExists(context))) {

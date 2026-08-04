@@ -3,10 +3,12 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
+  REASONING_EFFORT_PRESETS,
   normalizeApiKey,
   normalizeHeaderMap,
   normalizeHttpsBaseUrl,
-  normalizeModelId
+  normalizeModelId,
+  normalizeReasoningEffort
 } = require('../lib/validation');
 
 test('normalizes an HTTPS Base URL', () => {
@@ -43,4 +45,19 @@ test('validates model IDs and header maps', () => {
   assert.deepEqual(normalizeHeaderMap({ 'X-Feature': 'enabled' }), { 'X-Feature': 'enabled' });
   assert.throws(() => normalizeHeaderMap({ 'Bad Header': 'value' }));
   assert.throws(() => normalizeHeaderMap({ 'X-Test': 'value\r\ninjected: true' }));
+});
+
+test('supports Ultra and canonical reasoning-effort presets', () => {
+  assert.deepEqual(REASONING_EFFORT_PRESETS, [
+    'minimal',
+    'low',
+    'medium',
+    'high',
+    'xhigh',
+    'max',
+    'ultra'
+  ]);
+  assert.equal(normalizeReasoningEffort(' Ultra '), 'ultra');
+  assert.equal(normalizeReasoningEffort('MAX'), 'max');
+  assert.throws(() => normalizeReasoningEffort('ultra high'));
 });

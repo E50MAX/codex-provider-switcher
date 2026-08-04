@@ -2,7 +2,7 @@
   "name": "codex-provider-switcher",
   "displayName": "Secure Codex Provider Switcher (Unofficial)",
   "description": "在保留 ChatGPT 登录的同时，安全切换 Codex 到自定义 HTTPS Responses API。",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "publisher": "e50max",
   "author": {
     "name": "E50MAX"
@@ -54,6 +54,7 @@
     "onCommand:labCodex.configureLab",
     "onCommand:labCodex.useAccount",
     "onCommand:labCodex.useLab",
+    "onCommand:labCodex.setReasoningEffort",
     "onCommand:labCodex.deleteLabKey"
   ],
   "contributes": {
@@ -77,6 +78,11 @@
         "command": "labCodex.useLab",
         "title": "Codex: 使用自定义 API",
         "icon": "$(server-process)"
+      },
+      {
+        "command": "labCodex.setReasoningEffort",
+        "title": "Codex: 设置推理等级（含 Ultra）",
+        "icon": "$(dashboard)"
       },
       {
         "command": "labCodex.deleteLabKey",
