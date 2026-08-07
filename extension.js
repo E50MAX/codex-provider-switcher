@@ -6,33 +6,40 @@ const path = require('path');
 const os = require('os');
 const { spawn } = require('child_process');
 const {
-  REASONING_EFFORT_PRESETS,
   normalizeApiKey,
   normalizeHeaderMap,
   normalizeHttpsBaseUrl,
   normalizeModelId,
   normalizeReasoningEffort
 } = require('./lib/validation');
+const {
+  DEFAULT_REASONING_EFFORT,
+  buildCustomModelCatalog,
+  resolveCustomSelection
+} = require('./lib/model-catalog');
+const {
+  MAX_ASSET_NAME,
+  MAX_SUPPORT_MARKER,
+  patchMaxVisibilitySource
+} = require('./lib/max-patch');
+const { setTopLevelValue: setConfigTopLevelValue } = require('./lib/config-text');
 
 const PROVIDER_ID = 'lab_relay';
 const MANAGED_BEGIN = '# >>> codex-provider-switcher: lab_relay >>>';
 const MANAGED_END = '# <<< codex-provider-switcher: lab_relay <<<';
 const DEFAULT_PROVIDER_NAME = 'Custom Responses API';
-const DEFAULT_REASONING_EFFORT = 'max';
-const REASONING_EFFORT_DESCRIPTIONS = Object.freeze({
-  ultra: '最深推理；仅在模型支持时使用',
-  max: '极高推理；仅在模型支持时使用',
-  xhigh: '超高推理；仅在模型支持时使用',
-  high: '适合复杂逻辑、审查和边界情况',
-  medium: '质量、速度与消耗较均衡',
-  low: '适合直接任务，响应更快',
-  minimal: '最低推理；仅在模型支持时使用'
-});
+const CODEX_EXTENSION_ID = 'openai.chatgpt';
+const MAX_PATCH_CONSENT_KEY = 'max-patch-consent-v1';
+const MAX_PATCH_DISMISSED_KEY = 'max-patch-prompt-dismissed-v1';
 const MAX_SETTINGS_BYTES = 1024 * 1024;
+const MAX_MODEL_CACHE_BYTES = 5 * 1024 * 1024;
+const MAX_CODEX_ASSET_BYTES = 50 * 1024 * 1024;
 const MAX_POWERSHELL_OUTPUT_BYTES = 64 * 1024;
 const POWERSHELL_TIMEOUT_MS = 15000;
 
 let statusBarItem;
+let patchCheckTimer;
+let reloadScheduled = false;
 
 function codexHome() {
   return process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
@@ -49,6 +56,8 @@ function pathsFor(context) {
     settings: path.join(dataDir, 'settings.json'),
     secret: path.join(dataDir, 'api-key.v2.dpapi'),
     legacySecret: path.join(dataDir, 'api-key.dpapi'),
+    catalog: path.join(dataDir, 'models.json'),
+    modelCache: path.join(home, 'models_cache.json'),
     saveSecretScript: path.join(context.extensionPath, 'scripts', 'save-secret.ps1'),
     getSecretScript: path.join(context.extensionPath, 'scripts', 'get-secret.ps1')
   };
@@ -108,31 +117,7 @@ function topLevelValue(text, key) {
 }
 
 function setTopLevelValue(text, key, value) {
-  const newline = newlineOf(text);
-  const lines = text.split(/\r?\n/);
-  const tableIndex = lines.findIndex((line) => /^\s*\[/.test(line));
-  const topEnd = tableIndex === -1 ? lines.length : tableIndex;
-  const matcher = new RegExp(`^\\s*${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*=`);
-  const index = lines.slice(0, topEnd).findIndex((line) => matcher.test(line));
-
-  if (value === undefined || value === null || value === '') {
-    if (index !== -1) {
-      lines.splice(index, 1);
-    }
-    return lines.join(newline);
-  }
-
-  const replacement = `${key} = ${tomlString(value)}`;
-  if (index !== -1) {
-    lines[index] = replacement;
-  } else {
-    let insertAt = tableIndex === -1 ? lines.length : tableIndex;
-    while (insertAt > 0 && lines[insertAt - 1].trim() === '') {
-      insertAt -= 1;
-    }
-    lines.splice(insertAt, 0, replacement);
-  }
-  return lines.join(newline);
+  return setConfigTopLevelValue(text, key, value, MANAGED_BEGIN);
 }
 
 function escapeRegex(value) {
@@ -272,6 +257,38 @@ async function writeSettings(context, settings) {
   const extensionPaths = pathsFor(context);
   await ensureDirectories(context);
   await atomicWriteFile(extensionPaths.settings, `${JSON.stringify(settings, null, 2)}\n`);
+}
+
+async function refreshCustomModelCatalog(context, existing = {}) {
+  const extensionPaths = pathsFor(context);
+  await ensureNotSymlink(extensionPaths.modelCache);
+  await ensureNotSymlink(extensionPaths.catalog);
+
+  let stat;
+  try {
+    stat = await fs.promises.stat(extensionPaths.modelCache);
+  } catch (error) {
+    if (error && error.code === 'ENOENT') {
+      throw new Error('找不到 Codex 官方模型缓存；请先打开官方 Codex 并完成登录，让模型列表加载一次');
+    }
+    throw error;
+  }
+  if (!stat.isFile() || stat.size <= 0 || stat.size > MAX_MODEL_CACHE_BYTES) {
+    throw new Error('Codex 官方模型缓存大小异常，已拒绝读取');
+  }
+
+  let cache;
+  try {
+    cache = JSON.parse(await fs.promises.readFile(extensionPaths.modelCache, 'utf8'));
+  } catch (error) {
+    throw new Error(`Codex 官方模型缓存无法解析：${errorMessage(error)}`);
+  }
+
+  const catalog = buildCustomModelCatalog(cache);
+  const selection = resolveCustomSelection(catalog, existing);
+  await ensureDirectories(context);
+  await atomicWriteFile(extensionPaths.catalog, `${JSON.stringify(catalog, null, 2)}\n`);
+  return { catalog, selection };
 }
 
 async function backupAndWriteConfig(context, oldText, newText) {
@@ -479,41 +496,14 @@ async function promptAndSaveSecret(context, baseUrl, canKeepExisting) {
   return true;
 }
 
-async function selectReasoningEffort(existingEffort) {
-  let currentEffort = DEFAULT_REASONING_EFFORT;
-  try {
-    currentEffort = normalizeReasoningEffort(existingEffort) || DEFAULT_REASONING_EFFORT;
-  } catch {
-    currentEffort = DEFAULT_REASONING_EFFORT;
-  }
-
-  const presetValues = [...REASONING_EFFORT_PRESETS].reverse();
-  const items = presetValues.map((effort) => ({
-    label: effort === 'ultra' ? '$(star-full) ultra' : effort,
-    description: `${effort === currentEffort ? '当前 · ' : ''}${REASONING_EFFORT_DESCRIPTIONS[effort]}`,
-    effort
-  }));
-  if (!presetValues.includes(currentEffort)) {
-    items.unshift({
-      label: currentEffort,
-      description: '当前配置中的自定义档位',
-      effort: currentEffort
-    });
-  }
-
-  const selected = await vscode.window.showQuickPick(items, {
-    title: '设置 Codex 推理等级',
-    placeHolder: '档位必须由当前模型和 API 服务支持',
-    ignoreFocusOut: true,
-    matchOnDescription: true
-  });
-  return selected?.effort;
-}
-
 async function configureCustomApi(context) {
   assertWindows();
-  const settings = await readSettings(context);
+  let settings = await readSettings(context);
+  const activeConfig = await readConfig(context);
+  await rememberActiveMode(context, activeConfig, settings);
+  settings = await readSettings(context);
   const existing = settings.lab && typeof settings.lab === 'object' ? settings.lab : {};
+  const { selection } = await refreshCustomModelCatalog(context, existing);
   let existingBaseUrl;
   try {
     existingBaseUrl = normalizeHttpsBaseUrl(existing.baseUrl).baseUrl;
@@ -545,30 +535,6 @@ async function configureCustomApi(context) {
     return undefined;
   }
 
-  const modelInput = await vscode.window.showInputBox({
-    title: '配置自定义 Responses API',
-    prompt: '服务方提供的模型 ID',
-    value: typeof existing.model === 'string' ? existing.model : '',
-    ignoreFocusOut: true,
-    validateInput(value) {
-      try {
-        normalizeModelId(value);
-        return undefined;
-      } catch (error) {
-        return errorMessage(error);
-      }
-    }
-  });
-  if (modelInput === undefined) {
-    return undefined;
-  }
-  const model = normalizeModelId(modelInput);
-
-  const modelReasoningEffort = await selectReasoningEffort(existing.modelReasoningEffort);
-  if (!modelReasoningEffort) {
-    return undefined;
-  }
-
   const hasBoundSecret = await secretExists(context);
   const canKeepExisting = hasBoundSecret && baseUrl === existingBaseUrl;
   if (!(await promptAndSaveSecret(context, baseUrl, canKeepExisting))) {
@@ -578,9 +544,7 @@ async function configureCustomApi(context) {
   const custom = {
     name: DEFAULT_PROVIDER_NAME,
     baseUrl,
-    model,
-    reviewModel: model,
-    modelReasoningEffort,
+    ...selection,
     httpHeaders: normalizeHeaderMap(existing.httpHeaders)
   };
 
@@ -592,7 +556,9 @@ async function configureCustomApi(context) {
 
   const nextConfig = upsertProviderBlock(configText, context, custom);
   await backupAndWriteConfig(context, configText, nextConfig);
-  await vscode.window.showInformationMessage('自定义 API 已安全保存；ChatGPT 登录未被修改。');
+  await vscode.window.showInformationMessage(
+    '自定义 API 已安全保存；切换后请在 Codex 输入框下方选择模型和推理等级。'
+  );
   return custom;
 }
 
@@ -622,6 +588,10 @@ async function useCustomApi(context) {
   await rememberActiveMode(context, configText, settings);
   settings = await readSettings(context);
   custom = normalizeStoredCustom(settings.lab);
+  const { selection } = await refreshCustomModelCatalog(context, custom);
+  custom = { ...custom, ...selection };
+  settings.lab = custom;
+  await writeSettings(context, settings);
 
   let nextConfig = upsertProviderBlock(configText, context, custom);
   nextConfig = setTopLevelValue(nextConfig, 'model_provider', PROVIDER_ID);
@@ -629,7 +599,7 @@ async function useCustomApi(context) {
   nextConfig = setTopLevelValue(nextConfig, 'review_model', custom.reviewModel);
   nextConfig = setTopLevelValue(nextConfig, 'model_reasoning_effort', custom.modelReasoningEffort);
   nextConfig = setTopLevelValue(nextConfig, 'service_tier', undefined);
-  nextConfig = setTopLevelValue(nextConfig, 'model_catalog_json', undefined);
+  nextConfig = setTopLevelValue(nextConfig, 'model_catalog_json', pathsFor(context).catalog);
   await backupAndWriteConfig(context, configText, nextConfig);
   await updateStatus(context);
   await reloadAfterSwitch('自定义 API');
@@ -673,49 +643,6 @@ async function reloadAfterSwitch(label) {
   await reloadAfterChange(`Codex 已切换到 ${label}`);
 }
 
-async function setReasoningEffort(context) {
-  const configText = await readConfig(context);
-  const provider = topLevelValue(configText, 'model_provider') || 'openai';
-  if (provider !== 'openai' && provider !== PROVIDER_ID) {
-    throw new Error('当前模型服务商不受本切换器管理，已拒绝改写推理等级');
-  }
-
-  const currentEffort = normalizeReasoningEffort(topLevelValue(configText, 'model_reasoning_effort'))
-    || DEFAULT_REASONING_EFFORT;
-  const selectedEffort = await selectReasoningEffort(currentEffort);
-  if (!selectedEffort) {
-    return;
-  }
-  if (selectedEffort === currentEffort) {
-    await vscode.window.showInformationMessage(`Codex 推理等级已经是 ${selectedEffort}。`);
-    return;
-  }
-
-  const settings = await readSettings(context);
-  await rememberActiveMode(context, configText, settings);
-  const updatedSettings = await readSettings(context);
-  if (provider === 'openai') {
-    updatedSettings.account = {
-      ...(updatedSettings.account || accountSnapshot(configText)),
-      modelReasoningEffort: selectedEffort
-    };
-  } else {
-    if (!updatedSettings.lab) {
-      throw new Error('请先配置自定义 API');
-    }
-    updatedSettings.lab = {
-      ...customSnapshot(configText, updatedSettings.lab),
-      modelReasoningEffort: selectedEffort
-    };
-  }
-  await writeSettings(context, updatedSettings);
-
-  const nextConfig = setTopLevelValue(configText, 'model_reasoning_effort', selectedEffort);
-  await backupAndWriteConfig(context, configText, nextConfig);
-  await updateStatus(context);
-  await reloadAfterChange(`Codex 推理等级已设置为 ${selectedEffort}`);
-}
-
 async function switchConnection(context) {
   const configText = await readConfig(context);
   const current = topLevelValue(configText, 'model_provider') || 'openai';
@@ -732,13 +659,8 @@ async function switchConnection(context) {
     },
     {
       label: '$(settings-gear) 配置自定义 API',
-      description: '设置 HTTPS Base URL、模型 ID 和加密密钥',
+      description: '设置 HTTPS Base URL 和加密密钥',
       target: 'configure'
-    },
-    {
-      label: '$(dashboard) 设置推理等级',
-      description: '包含 ultra、max、xhigh、high、medium、low 和 minimal',
-      target: 'reasoning'
     }
   ], {
     title: '切换 Codex 连接',
@@ -753,8 +675,6 @@ async function switchConnection(context) {
     await useAccount(context);
   } else if (selected.target === 'custom') {
     await useCustomApi(context);
-  } else if (selected.target === 'reasoning') {
-    await setReasoningEffort(context);
   } else {
     await configureCustomApi(context);
     await updateStatus(context);
@@ -772,6 +692,215 @@ async function deleteCustomApiKey(context) {
   }
   await deleteSecrets(context);
   await vscode.window.showInformationMessage('本机保存的自定义 API Key 已删除。');
+}
+
+function isPathInside(rootPath, candidatePath) {
+  const relative = path.relative(rootPath, candidatePath);
+  return relative.length > 0 && !relative.startsWith('..') && !path.isAbsolute(relative);
+}
+
+async function readCodexAsset(assetPath) {
+  const stat = await fs.promises.lstat(assetPath);
+  if (stat.isSymbolicLink() || !stat.isFile()) {
+    throw new Error('Codex webview 资源不是普通文件，已拒绝修改');
+  }
+  if (stat.size <= 0 || stat.size > MAX_CODEX_ASSET_BYTES) {
+    throw new Error('Codex webview 资源大小异常，已拒绝修改');
+  }
+  return fs.promises.readFile(assetPath, 'utf8');
+}
+
+async function inspectCodexMaxPatch() {
+  const codexExtension = vscode.extensions.getExtension(CODEX_EXTENSION_ID);
+  if (!codexExtension) {
+    return { status: 'not-installed' };
+  }
+
+  const version = String(codexExtension.packageJSON.version || 'unknown');
+  const extensionRoot = await fs.promises.realpath(codexExtension.extensionPath);
+  const assetsPath = path.join(extensionRoot, 'webview', 'assets');
+  const assetsStat = await fs.promises.lstat(assetsPath);
+  if (assetsStat.isSymbolicLink() || !assetsStat.isDirectory()) {
+    return { status: 'unsupported', version, reason: 'Codex webview assets 目录结构异常' };
+  }
+  const assetsRoot = await fs.promises.realpath(assetsPath);
+  if (!isPathInside(extensionRoot, assetsRoot)) {
+    return { status: 'unsupported', version, reason: 'Codex webview assets 路径越界' };
+  }
+
+  const markerFiles = [];
+  const assetNames = await fs.promises.readdir(assetsRoot);
+  for (const assetName of assetNames.filter((name) => MAX_ASSET_NAME.test(name))) {
+    const assetPath = path.join(assetsRoot, assetName);
+    const assetStat = await fs.promises.lstat(assetPath);
+    if (assetStat.isSymbolicLink() || !assetStat.isFile()) {
+      return { status: 'unsupported', version, reason: 'Codex webview 资源不是普通文件' };
+    }
+    const realAssetPath = await fs.promises.realpath(assetPath);
+    if (!isPathInside(assetsRoot, realAssetPath)) {
+      return { status: 'unsupported', version, reason: 'Codex webview 资源路径越界' };
+    }
+    const source = await readCodexAsset(realAssetPath);
+    if (source.includes(MAX_SUPPORT_MARKER)) {
+      markerFiles.push({ assetPath: realAssetPath, source });
+    }
+  }
+
+  if (markerFiles.length !== 1) {
+    return {
+      status: 'unsupported',
+      version,
+      reason: `预期找到 1 个 Max 支持资源，实际找到 ${markerFiles.length} 个`
+    };
+  }
+
+  const target = markerFiles[0];
+  const result = patchMaxVisibilitySource(target.source);
+  if (result.status === 'already-patched') {
+    return { status: 'already-patched', version, assetPath: target.assetPath };
+  }
+  if (result.status !== 'patched') {
+    return { status: 'unsupported', version, reason: result.reason };
+  }
+  return {
+    status: 'ready',
+    version,
+    assetPath: target.assetPath,
+    patchedSource: result.source
+  };
+}
+
+async function applyCodexMaxPatch(inspection) {
+  const currentSource = await readCodexAsset(inspection.assetPath);
+  const currentResult = patchMaxVisibilitySource(currentSource);
+  if (currentResult.status === 'already-patched') {
+    return { status: 'already-patched' };
+  }
+  if (currentResult.status !== 'patched' || currentResult.source !== inspection.patchedSource) {
+    throw new Error('Codex webview 在确认后发生变化，已取消修复');
+  }
+
+  await atomicWriteFile(inspection.assetPath, currentResult.source);
+  const verification = patchMaxVisibilitySource(await readCodexAsset(inspection.assetPath));
+  if (verification.status !== 'already-patched') {
+    throw new Error('写入后的 Max 修复未通过结构校验');
+  }
+  return { status: 'patched' };
+}
+
+function scheduleWindowReload(message) {
+  if (reloadScheduled) {
+    return;
+  }
+  reloadScheduled = true;
+  vscode.window.setStatusBarMessage(message, 2500);
+  setTimeout(() => {
+    vscode.commands.executeCommand('workbench.action.reloadWindow');
+  }, 800);
+}
+
+async function requestMaxPatchConsent(context, version) {
+  const choice = await vscode.window.showWarningMessage(
+    '让 Codex 对话框显示 Max 推理等级？',
+    {
+      modal: true,
+      detail: `Codex ${version} 当前会隐藏模型目录中已经声明支持的 Max 档。\n\n修复会在严格校验后修改官方 Codex 扩展的一处本地 webview 过滤器；官方扩展更新会覆盖该修改，切换器可在再次校验后自动恢复。`
+    },
+    '修复 Max 并重载'
+  );
+  const accepted = choice === '修复 Max 并重载';
+  await context.globalState.update(MAX_PATCH_CONSENT_KEY, accepted || undefined);
+  await context.globalState.update(MAX_PATCH_DISMISSED_KEY, accepted ? undefined : true);
+  return accepted;
+}
+
+async function finishMaxPatch(version) {
+  const configuration = vscode.workspace.getConfiguration('labCodex');
+  if (configuration.get('autoReloadAfterMaxPatch', true)) {
+    scheduleWindowReload(`Codex ${version} 的 Max 档已恢复，正在重载窗口…`);
+    return;
+  }
+  const action = await vscode.window.showInformationMessage(
+    `Codex ${version} 的 Max 档已恢复；重载窗口后生效。`,
+    '立即重载'
+  );
+  if (action === '立即重载') {
+    scheduleWindowReload('Codex Max 档已恢复，正在重载窗口…');
+  }
+}
+
+async function ensureCodexMaxVisible(context, { manual = false } = {}) {
+  const configuration = vscode.workspace.getConfiguration('labCodex');
+  if (!manual && !configuration.get('autoPatchMax', true)) {
+    return { status: 'disabled' };
+  }
+
+  let inspection;
+  try {
+    inspection = await inspectCodexMaxPatch();
+  } catch (error) {
+    inspection = { status: 'unsupported', version: 'unknown', reason: errorMessage(error) };
+  }
+
+  if (inspection.status === 'already-patched') {
+    if (manual) {
+      await vscode.window.showInformationMessage(`Codex ${inspection.version} 的 Max 档已经可见。`);
+    }
+    return inspection;
+  }
+  if (inspection.status === 'not-installed') {
+    if (manual) {
+      await vscode.window.showWarningMessage('未找到官方 OpenAI Codex VS Code 扩展。');
+    }
+    return inspection;
+  }
+  if (inspection.status !== 'ready') {
+    const warningKey = `max-patch-warning:${inspection.version}`;
+    if (manual || context.globalState.get(warningKey) !== inspection.reason) {
+      await context.globalState.update(warningKey, inspection.reason);
+      await vscode.window.showWarningMessage(
+        `无法安全恢复 Codex ${inspection.version} 的 Max 档：${inspection.reason}`
+      );
+    }
+    return inspection;
+  }
+
+  let consented = context.globalState.get(MAX_PATCH_CONSENT_KEY) === true;
+  if (!consented) {
+    if (!manual && context.globalState.get(MAX_PATCH_DISMISSED_KEY) === true) {
+      return { status: 'declined', version: inspection.version };
+    }
+    consented = await requestMaxPatchConsent(context, inspection.version);
+    if (!consented) {
+      return { status: 'declined', version: inspection.version };
+    }
+  }
+
+  let result;
+  try {
+    result = await applyCodexMaxPatch(inspection);
+  } catch (error) {
+    const reason = errorMessage(error);
+    const warningKey = `max-patch-write-warning:${inspection.version}`;
+    if (manual || context.globalState.get(warningKey) !== reason) {
+      await context.globalState.update(warningKey, reason);
+      await vscode.window.showWarningMessage(`Codex ${inspection.version} 的 Max 修复写入失败：${reason}`);
+    }
+    return { status: 'error', version: inspection.version, reason };
+  }
+  if (result.status === 'patched') {
+    await finishMaxPatch(inspection.version);
+  }
+  return { ...result, version: inspection.version };
+}
+
+function queueMaxPatchCheck(context) {
+  clearTimeout(patchCheckTimer);
+  patchCheckTimer = setTimeout(() => {
+    ensureCodexMaxVisible(context).catch((error) => {
+      console.error('Codex Max patch check failed', error);
+    });
+  }, 1200);
 }
 
 async function updateStatus(context) {
@@ -840,8 +969,12 @@ async function activate(context) {
   registerSafeCommand(context, 'labCodex.configureLab', () => configureCustomApi(context));
   registerSafeCommand(context, 'labCodex.useAccount', () => useAccount(context));
   registerSafeCommand(context, 'labCodex.useLab', () => useCustomApi(context));
-  registerSafeCommand(context, 'labCodex.setReasoningEffort', () => setReasoningEffort(context));
+  registerSafeCommand(context, 'labCodex.repairMaxOption', () => {
+    assertWindows();
+    return ensureCodexMaxVisible(context, { manual: true });
+  });
   registerSafeCommand(context, 'labCodex.deleteLabKey', () => deleteCustomApiKey(context));
+  context.subscriptions.push(vscode.extensions.onDidChange(() => queueMaxPatchCheck(context)));
 
   if (await legacySecretExists(context) && !(await secretExists(context))) {
     const warningKey = 'v2-bound-secret-migration-warning';
@@ -853,10 +986,14 @@ async function activate(context) {
 
   if (process.platform !== 'win32') {
     await vscode.window.showWarningMessage('Codex Provider Switcher 当前仅支持 Windows DPAPI。');
+  } else {
+    await ensureCodexMaxVisible(context);
   }
   await updateStatus(context);
 }
 
-function deactivate() {}
+function deactivate() {
+  clearTimeout(patchCheckTimer);
+}
 
 module.exports = { activate, deactivate };

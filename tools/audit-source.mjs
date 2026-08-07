@@ -48,6 +48,9 @@ for (const relativePath of sourceFiles) {
 const runtimeFiles = [
   'extension.js',
   path.join('lib', 'validation.js'),
+  path.join('lib', 'config-text.js'),
+  path.join('lib', 'model-catalog.js'),
+  path.join('lib', 'max-patch.js'),
   path.join('scripts', 'get-secret.ps1'),
   path.join('scripts', 'save-secret.ps1')
 ];
@@ -55,13 +58,26 @@ const runtimeText = runtimeFiles.map((file) => fs.readFileSync(path.join(root, f
 const forbiddenRuntimePatterns = [
   /ExecutionPolicy[\s\S]{0,40}Bypass/i,
   /patchCodexMaxVisibility/,
-  /webview[\\/]assets/,
   /DEFAULT_LAB_BASE_URL/,
   /http:\/\//i
 ];
 for (const pattern of forbiddenRuntimePatterns) {
   if (pattern.test(runtimeText)) {
     findings.push(`runtime source matches forbidden pattern: ${pattern}`);
+  }
+}
+
+const extensionText = fs.readFileSync(path.join(root, 'extension.js'), 'utf8');
+const requiredMaxPatchSafeguards = [
+  /MAX_PATCH_CONSENT_KEY/,
+  /markerFiles\.length !== 1/,
+  /assetStat\.isSymbolicLink\(\)/,
+  /verification\.status !== 'already-patched'/,
+  /patchMaxVisibilitySource/
+];
+for (const pattern of requiredMaxPatchSafeguards) {
+  if (!pattern.test(extensionText)) {
+    findings.push(`Max visibility repair is missing safeguard: ${pattern}`);
   }
 }
 

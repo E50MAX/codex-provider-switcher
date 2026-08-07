@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.1.0
+
+- Restored a generated custom model catalog for GPT-5.6 Sol, Terra, and Luna.
+- Moved custom model and reasoning selection into the official Codex composer controls.
+- Removed model-ID and reasoning-effort prompts from custom API setup.
+- Fixed top-level connection settings being removed on reload when the managed block was first in `config.toml`.
+- Added an explicit-consent, structurally validated repair for the Codex Max reasoning option.
+- Added automatic revalidation after official Codex extension updates.
+- Added model-catalog and Max-repair unit tests.
+
 ## 2.0.1
 
 - Added an explicit reasoning-effort picker with `ultra`, `max`, `xhigh`, `high`, `medium`, `low`, and `minimal` presets.

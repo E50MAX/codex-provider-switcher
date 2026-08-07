@@ -1,8 +1,8 @@
 {
   "name": "codex-provider-switcher",
   "displayName": "Secure Codex Provider Switcher (Unofficial)",
-  "description": "在保留 ChatGPT 登录的同时，安全切换 Codex 到自定义 HTTPS Responses API。",
-  "version": "2.0.1",
+  "description": "安全切换 Codex 到自定义 HTTPS Responses API，并在对话框内选择中转模型和推理等级。",
+  "version": "2.1.0",
   "publisher": "e50max",
   "author": {
     "name": "E50MAX"
@@ -54,7 +54,7 @@
     "onCommand:labCodex.configureLab",
     "onCommand:labCodex.useAccount",
     "onCommand:labCodex.useLab",
-    "onCommand:labCodex.setReasoningEffort",
+    "onCommand:labCodex.repairMaxOption",
     "onCommand:labCodex.deleteLabKey"
   ],
   "contributes": {
@@ -80,9 +80,9 @@
         "icon": "$(server-process)"
       },
       {
-        "command": "labCodex.setReasoningEffort",
-        "title": "Codex: 设置推理等级（含 Ultra）",
-        "icon": "$(dashboard)"
+        "command": "labCodex.repairMaxOption",
+        "title": "Codex: 修复对话框中的 Max 推理等级",
+        "icon": "$(tools)"
       },
       {
         "command": "labCodex.deleteLabKey",
@@ -97,12 +97,22 @@
           "type": "boolean",
           "default": true,
           "description": "切换 provider 后自动重载 VS Code 窗口，使新连接立即生效。"
+        },
+        "labCodex.autoPatchMax": {
+          "type": "boolean",
+          "default": true,
+          "description": "获得一次明确同意后，在官方 Codex 更新时重新校验并恢复对话框中的 Max 推理等级。"
+        },
+        "labCodex.autoReloadAfterMaxPatch": {
+          "type": "boolean",
+          "default": true,
+          "description": "成功恢复 Max 推理等级后自动重载一次 VS Code 窗口。"
         }
       }
     }
   },
   "scripts": {
-    "lint": "node --check extension.js && node --check lib/validation.js && node --check tools/audit-source.mjs && node --check tools/publish-marketplace.mjs",
+    "lint": "node --check extension.js && node --check lib/validation.js && node --check lib/config-text.js && node --check lib/model-catalog.js && node --check lib/max-patch.js && node --check tools/audit-source.mjs && node --check tools/publish-marketplace.mjs",
     "test": "node --test",
     "audit": "node tools/audit-source.mjs",
     "verify": "npm run lint && npm test && npm run audit",

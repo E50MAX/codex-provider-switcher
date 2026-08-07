@@ -13,11 +13,14 @@ It provides the following controls:
 - a configuration check before the key is decrypted;
 - no telemetry, analytics, remote code loading, or custom updater;
 - a strict VSIX file allowlist;
-- no modification of the official OpenAI Codex extension.
+- explicit one-time consent before repairing the official Codex model picker's Max filter;
+- path, file-type, size, marker-count, replacement-count, and post-write checks around that repair.
 
 ## Important limitations
 
 The extension configures Codex, but Codex owns the actual network connection. This extension therefore does not implement certificate pinning and cannot override Codex's TLS stack.
+
+To expose a model-catalog entry's `max` reasoning level in the current Codex VS Code UI, the extension can modify one minified webview asset inside the installed official Codex extension. This is opt-in. The repair proceeds only when one known structural pattern matches exactly once, and it is refused after any unrecognized upstream change. An official Codex update replaces the modified asset; if automatic repair remains enabled, the extension checks the new version again before writing. VS Code or endpoint-security software may still report a modified extension installation. Reinstalling or updating the official Codex extension restores its original files.
 
 It cannot protect against:
 
