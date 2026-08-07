@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.1.2
+
+- Removed the decorative Logo from the README while retaining it as the extension and Marketplace icon.
+
 ## 2.1.1
 
 - Added the supplied `Logo.png` as the extension and Marketplace icon.
