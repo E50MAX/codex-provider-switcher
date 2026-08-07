@@ -1,5 +1,9 @@
 # Secure Codex Provider Switcher（非官方）
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/E50MAX/codex-provider-switcher/main/Logo.png" alt="Secure Codex Provider Switcher Logo" width="260">
+</p>
+
 这是一个仅限 Windows 的 VS Code 扩展，用来在官方 Codex 的两种连接之间切换：
 
 - 已登录的 ChatGPT 账户；

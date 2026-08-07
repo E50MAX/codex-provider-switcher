@@ -100,7 +100,8 @@ const allowedFileEntries = new Set([
   'SECURITY.md',
   'PRIVACY.md',
   'CHANGELOG.md',
-  'LICENSE.txt'
+  'LICENSE.txt',
+  'Logo.png'
 ]);
 for (const entry of manifest.files || []) {
   if (!allowedFileEntries.has(entry)) {

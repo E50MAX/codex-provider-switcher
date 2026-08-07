@@ -2,7 +2,7 @@
   "name": "codex-provider-switcher",
   "displayName": "Secure Codex Provider Switcher (Unofficial)",
   "description": "安全切换 Codex 到自定义 HTTPS Responses API，并在对话框内选择中转模型和推理等级。",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "publisher": "e50max",
   "author": {
     "name": "E50MAX"
@@ -17,6 +17,7 @@
   },
   "license": "MIT",
   "pricing": "Free",
+  "icon": "Logo.png",
   "preview": true,
   "engines": {
     "vscode": "^1.96.0"
@@ -129,7 +130,8 @@
     "SECURITY.md",
     "PRIVACY.md",
     "CHANGELOG.md",
-    "LICENSE.txt"
+    "LICENSE.txt",
+    "Logo.png"
   ],
   "devDependencies": {
     "@azure/identity": "4.13.1",

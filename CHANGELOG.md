@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.1.1
+
+- Added the supplied `Logo.png` as the extension and Marketplace icon.
+
 ## 2.1.0
 
 - Restored a generated custom model catalog for GPT-5.6 Sol, Terra, and Luna.
