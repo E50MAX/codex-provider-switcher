@@ -51,6 +51,7 @@ const runtimeFiles = [
   path.join('lib', 'config-text.js'),
   path.join('lib', 'model-catalog.js'),
   path.join('lib', 'max-patch.js'),
+  path.join('lib', 'history-patch.js'),
   path.join('scripts', 'get-secret.ps1'),
   path.join('scripts', 'save-secret.ps1')
 ];
@@ -81,6 +82,20 @@ for (const pattern of requiredMaxPatchSafeguards) {
   }
 }
 
+const requiredHistoryPatchSafeguards = [
+  /HISTORY_PATCH_CONSENT_KEY/,
+  /historyAssets\.length !== 1/,
+  /resolveCodexFile/,
+  /verification\.status !== 'already-supported'/,
+  /patchSharedHistorySource/,
+  /currentSource !== target\.patchedSource/
+];
+for (const pattern of requiredHistoryPatchSafeguards) {
+  if (!pattern.test(extensionText)) {
+    findings.push(`Shared-history repair is missing safeguard: ${pattern}`);
+  }
+}
+
 const runtimeUrls = runtimeText.match(/https:\/\/[^\s'"`]+/g) || [];
 for (const rawUrl of runtimeUrls) {
   const cleaned = rawUrl.replace(/[),.;]+$/, '');
@@ -91,6 +106,29 @@ for (const rawUrl of runtimeUrls) {
 }
 
 const manifest = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+const contributedCommands = new Set(
+  (manifest.contributes?.commands || []).map((entry) => entry.command)
+);
+const requiredCommands = [
+  'labCodex.repairSharedHistory',
+  'labCodex.repairMaxOption'
+];
+for (const command of requiredCommands) {
+  if (!contributedCommands.has(command)) {
+    findings.push(`package.json is missing required repair command: ${command}`);
+  }
+  if (!(manifest.activationEvents || []).includes(`onCommand:${command}`)) {
+    findings.push(`package.json is missing activation event for: ${command}`);
+  }
+}
+
+const configurationProperties = manifest.contributes?.configuration?.properties || {};
+for (const setting of ['labCodex.autoPatchSharedHistory', 'labCodex.autoPatchMax']) {
+  if (configurationProperties[setting]?.type !== 'boolean') {
+    findings.push(`package.json is missing boolean repair setting: ${setting}`);
+  }
+}
+
 const allowedFileEntries = new Set([
   'extension.js',
   'lib/**',

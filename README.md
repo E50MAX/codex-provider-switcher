@@ -5,6 +5,8 @@
 - 已登录的 ChatGPT 账户；
 - 你自己信任的 HTTPS Responses API 中转站。
 
+两种连接使用同一个 `CODEX_HOME`，并可在官方 Codex 中显示同一份本地历史列表。已有会话不需要导出、复制或迁移；切换连接后仍可找到并打开另一种连接创建的本地会话。
+
 配置中转站时只需要填写 **HTTPS Base URL** 和 **API Key**。模型与推理等级不再手工输入，切换完成后直接在官方 Codex 输入框下方选择。
 
 当前中转模式会显示 3 个模型：
@@ -52,7 +54,25 @@ code --install-extension e50max.codex-provider-switcher
 4. 点击 **Install from VSIX... / 从 VSIX 安装...**。
 5. 选择刚下载的 VSIX，安装后重载 VS Code。
 
-## 三、第一次出现 Max 修复提示
+## 三、第一次启用账户 / API 共享历史
+
+当前官方 Codex 会按 Provider 过滤本地历史，导致切换连接后只显示当前一侧的会话。本扩展启动后会检查官方 Codex 的历史查询结构；只有扩展主程序和唯一的历史面板资源都能通过严格校验时，才会显示确认框。
+
+想让两边历史出现在同一列表：
+
+1. 仔细阅读“让 ChatGPT 账户与自定义 API 共享本地历史？”提示。
+2. 点击 **共享历史并重载**。
+3. 等 VS Code 自动重载，再打开 Codex 历史列表。
+
+暂时不想修改官方扩展，可点击 **Cancel**。以后随时按 `Ctrl+Shift+P`，运行 `Codex: 修复账户 / API 共享历史`。
+
+这项修复只把官方 Codex 历史查询中的 Provider 过滤参数改成“查询全部 Provider”，不会读取、复制或修改任何会话内容，也不会改写 Codex 的历史数据库。官方 Codex 更新或重装会恢复原文件；切换器会在新版结构仍能通过严格校验时自动恢复。
+
+> 共享范围仅限当前电脑、同一 `CODEX_HOME` 下的 Codex 本地会话。它不会把 API 会话上传到 ChatGPT，也不包含 `chatgpt.com` 或 ChatGPT 客户端的云端聊天记录。
+
+切换连接会重载窗口。重载后再打开旧会话，后续请求使用状态栏显示的当前连接；Codex 可能把该会话已有的消息和上下文一并发给当前 Provider。继续敏感会话前，请先确认状态栏和目标服务方。
+
+## 四、第一次出现 Max 修复提示
 
 新电脑上的官方 Codex 可能已经支持 `Max`，但输入框下方的推理等级菜单会把它隐藏。本扩展启动后会先检查当前官方 Codex 版本；只有识别到唯一的已知过滤器时，才会显示下面的确认框。
 
@@ -66,9 +86,9 @@ code --install-extension e50max.codex-provider-switcher
 
 暂时不想修改官方扩展，可点击 **Cancel**。以后随时按 `Ctrl+Shift+P`，运行 `Codex: 修复对话框中的 Max 推理等级`。
 
-> 这项修复会在你明确同意后修改本机官方 Codex 扩展的一处 webview 资源。官方 Codex 更新或重装会恢复原文件；切换器会在新版结构仍能通过严格校验时再次询问或自动恢复。详见下方“Max 修复的边界”。
+> 这项修复会在你明确同意后修改本机官方 Codex 扩展的一处 webview 资源。官方 Codex 更新或重装会恢复原文件；切换器会在新版结构仍能通过严格校验时自动恢复。详见下方“共享历史与 Max 兼容修复的边界”。
 
-## 四、配置中转站 URL 和 API Key
+## 五、配置中转站 URL 和 API Key
 
 ### 第 1 步：打开切换菜单
 
@@ -119,7 +139,7 @@ API Key 会用当前 Windows 用户的 DPAPI 加密，并与这条完整 HTTPS B
 3. 等 VS Code 自动重载。
 4. 重载后查看右下角，确认显示 `Codex: 自定义 API`。
 
-## 五、在输入框下方选择模型和推理等级
+## 六、在输入框下方选择模型和推理等级
 
 切换到自定义 API 并重载后，打开官方 Codex 面板。输入框下方会出现类似 `中转 · GPT-5.6-Sol Max` 的按钮。
 
@@ -143,7 +163,7 @@ API Key 会用当前 Windows 用户的 DPAPI 加密，并与这条完整 HTTPS B
 
 建议切换模型后新建一个对话，避免旧对话继续沿用之前的模型状态。
 
-## 六、切回 ChatGPT 账户
+## 七、切回 ChatGPT 账户
 
 1. 点击 VS Code 右下角的 `Codex: 自定义 API`。
 2. 在菜单中点击 **ChatGPT 账户**。
@@ -162,6 +182,12 @@ API Key 会用当前 Windows 用户的 DPAPI 加密，并与这条完整 HTTPS B
 
 先看右下角状态栏是否为 `Codex: 自定义 API`。如果是，请运行 `Developer: Reload Window`，然后新建一个 Codex 对话。仍不正常时，重新执行一次 `Codex: 使用自定义 API`。
 
+### 历史列表仍然只显示当前连接的会话
+
+按 `Ctrl+Shift+P`，运行 `Codex: 修复账户 / API 共享历史`，同意修复并重载窗口。如果扩展提示当前官方 Codex 版本不受支持，它会保持所有文件不变；请先升级本切换器，再查看 GitHub Release 说明。
+
+共享历史不会恢复已经删除的会话，也不会拉取其他电脑或 ChatGPT 云端的聊天记录。
+
 ### 新电脑没有 Max
 
 按 `Ctrl+Shift+P`，运行 `Codex: 修复对话框中的 Max 推理等级`。如果扩展提示当前官方 Codex 版本不受支持，不会强行写入文件；请先升级本切换器，再查看 GitHub Release 说明。
@@ -174,16 +200,27 @@ API Key 会用当前 Windows 用户的 DPAPI 加密，并与这条完整 HTTPS B
 
 按 `Ctrl+Shift+P`，运行 `Codex: 删除本机自定义 API Key`。
 
-## Max 修复的边界
+## 共享历史与 Max 兼容修复的边界
+
+### 共享本地历史
+
+OpenAI App Server 的 `thread/list` 接口支持通过 `modelProviders` 过滤本地会话。当前官方 VS Code 扩展在若干历史查询中只取当前 Provider，因此账户和 API 的本地会话会分开显示。本扩展把经过验证的查询改为请求全部 Provider；不移动会话文件，也不读写历史数据库。参见 [OpenAI Codex App Server](https://learn.chatgpt.com/docs/app-server)。
+
+共享的是“历史入口和上下文”，不是两边服务端的数据同步。打开旧会话后，新请求会使用切换器当前选中的连接。
+
+### Max 推理等级
 
 OpenAI 官方配置参考公开支持用 `model_catalog_json` 加载本地模型目录，但公开的 `model_reasoning_effort` 枚举目前只列到 `xhigh`。因此，本扩展通过模型目录让 Codex 识别中转模型及其推理等级，同时把“让当前 VS Code 界面显示 Max”作为单独的兼容修复处理。参见 [OpenAI Codex Configuration Reference](https://learn.chatgpt.com/docs/config-file/config-reference)。
 
-修复具有以下限制：
+### 共同的安全限制
 
-- 必须先得到一次明确同意；
+两项修复具有以下限制：
+
+- 必须分别得到一次明确同意；
 - 只检查发布者为 OpenAI、扩展 ID 为 `openai.chatgpt` 的本地官方扩展；
 - 校验安装路径、符号链接、文件类型、文件大小、结构标记和匹配次数；
-- 只有已知过滤器恰好匹配一次才会写入；
+- 共享历史只修改扩展主程序和唯一的历史面板资源；任一写入失败都会尝试回滚，若文件同时被其他程序修改则拒绝覆盖并报告错误；
+- Max 只有在已知过滤器恰好匹配一次时才会写入；
 - 写入后再次校验结果，不认识的新版本会直接拒绝修改；
 - 官方 Codex 更新、重装或 VS Code 安全工具可能恢复或报告被修改的资源。
 
@@ -195,6 +232,7 @@ OpenAI 官方配置参考公开支持用 `model_catalog_json` 加载本地模型
 - 只接受 HTTPS Base URL，并在首次配置或地址变化时要求确认目标主机。
 - API Key 使用 Windows DPAPI 加密，不写入 `config.toml`。
 - 切换器只管理自己的配置区块，并保留 ChatGPT 登录。
+- 共享历史修复不读取或修改 Codex 的会话数据库，只调整官方界面的本地查询参数。
 - 使用自定义 API 时，Codex 会把提示词、源码上下文、工具数据和 API Key 发送给你选择的服务方；你必须自行确认该服务方可信。
 - 不要关闭 VS Code 的扩展签名校验，也不要从不可信镜像安装 VSIX。
 

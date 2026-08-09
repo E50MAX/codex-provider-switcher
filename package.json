@@ -1,8 +1,8 @@
 {
   "name": "codex-provider-switcher",
   "displayName": "Secure Codex Provider Switcher (Unofficial)",
-  "description": "安全切换 Codex 到自定义 HTTPS Responses API，并在对话框内选择中转模型和推理等级。",
-  "version": "2.1.2",
+  "description": "安全切换 ChatGPT 账户与自定义 HTTPS Responses API，共用本地历史并选择中转模型和推理等级。",
+  "version": "2.2.0",
   "publisher": "e50max",
   "author": {
     "name": "E50MAX"
@@ -32,6 +32,7 @@
     "responses api",
     "openai compatible",
     "switcher",
+    "history",
     "security"
   ],
   "main": "./extension.js",
@@ -55,6 +56,7 @@
     "onCommand:labCodex.configureLab",
     "onCommand:labCodex.useAccount",
     "onCommand:labCodex.useLab",
+    "onCommand:labCodex.repairSharedHistory",
     "onCommand:labCodex.repairMaxOption",
     "onCommand:labCodex.deleteLabKey"
   ],
@@ -81,6 +83,11 @@
         "icon": "$(server-process)"
       },
       {
+        "command": "labCodex.repairSharedHistory",
+        "title": "Codex: 修复账户 / API 共享历史",
+        "icon": "$(history)"
+      },
+      {
         "command": "labCodex.repairMaxOption",
         "title": "Codex: 修复对话框中的 Max 推理等级",
         "icon": "$(tools)"
@@ -99,6 +106,16 @@
           "default": true,
           "description": "切换 provider 后自动重载 VS Code 窗口，使新连接立即生效。"
         },
+        "labCodex.autoPatchSharedHistory": {
+          "type": "boolean",
+          "default": true,
+          "description": "获得一次明确同意后，在官方 Codex 更新时重新校验并恢复账户与自定义 API 的共享本地历史列表。"
+        },
+        "labCodex.autoReloadAfterSharedHistoryPatch": {
+          "type": "boolean",
+          "default": true,
+          "description": "成功恢复账户与自定义 API 的共享历史列表后自动重载一次 VS Code 窗口。"
+        },
         "labCodex.autoPatchMax": {
           "type": "boolean",
           "default": true,
@@ -113,7 +130,7 @@
     }
   },
   "scripts": {
-    "lint": "node --check extension.js && node --check lib/validation.js && node --check lib/config-text.js && node --check lib/model-catalog.js && node --check lib/max-patch.js && node --check tools/audit-source.mjs && node --check tools/publish-marketplace.mjs",
+    "lint": "node --check extension.js && node --check lib/validation.js && node --check lib/config-text.js && node --check lib/model-catalog.js && node --check lib/max-patch.js && node --check lib/history-patch.js && node --check tools/audit-source.mjs && node --check tools/publish-marketplace.mjs",
     "test": "node --test",
     "audit": "node tools/audit-source.mjs",
     "verify": "npm run lint && npm test && npm run audit",

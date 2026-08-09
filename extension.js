@@ -22,6 +22,11 @@ const {
   MAX_SUPPORT_MARKER,
   patchMaxVisibilitySource
 } = require('./lib/max-patch');
+const {
+  HISTORY_ASSET_NAME,
+  THREAD_LIST_MARKER,
+  patchSharedHistorySource
+} = require('./lib/history-patch');
 const { setTopLevelValue: setConfigTopLevelValue } = require('./lib/config-text');
 
 const PROVIDER_ID = 'lab_relay';
@@ -31,6 +36,8 @@ const DEFAULT_PROVIDER_NAME = 'Custom Responses API';
 const CODEX_EXTENSION_ID = 'openai.chatgpt';
 const MAX_PATCH_CONSENT_KEY = 'max-patch-consent-v1';
 const MAX_PATCH_DISMISSED_KEY = 'max-patch-prompt-dismissed-v1';
+const HISTORY_PATCH_CONSENT_KEY = 'shared-history-patch-consent-v1';
+const HISTORY_PATCH_DISMISSED_KEY = 'shared-history-patch-prompt-dismissed-v1';
 const MAX_SETTINGS_BYTES = 1024 * 1024;
 const MAX_MODEL_CACHE_BYTES = 5 * 1024 * 1024;
 const MAX_CODEX_ASSET_BYTES = 50 * 1024 * 1024;
@@ -38,7 +45,7 @@ const MAX_POWERSHELL_OUTPUT_BYTES = 64 * 1024;
 const POWERSHELL_TIMEOUT_MS = 15000;
 
 let statusBarItem;
-let patchCheckTimer;
+let compatibilityPatchTimer;
 let reloadScheduled = false;
 
 function codexHome() {
@@ -209,11 +216,6 @@ async function atomicWriteFile(filePath, contents) {
   await fs.promises.writeFile(temporaryPath, contents, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
   try {
     await fs.promises.rename(temporaryPath, filePath);
-  } catch (error) {
-    if (!error || !['EEXIST', 'EPERM'].includes(error.code)) {
-      throw error;
-    }
-    await fs.promises.copyFile(temporaryPath, filePath);
   } finally {
     await fs.promises.rm(temporaryPath, { force: true });
   }
@@ -702,12 +704,157 @@ function isPathInside(rootPath, candidatePath) {
 async function readCodexAsset(assetPath) {
   const stat = await fs.promises.lstat(assetPath);
   if (stat.isSymbolicLink() || !stat.isFile()) {
-    throw new Error('Codex webview 资源不是普通文件，已拒绝修改');
+    throw new Error('Codex 资源不是普通文件，已拒绝修改');
   }
   if (stat.size <= 0 || stat.size > MAX_CODEX_ASSET_BYTES) {
-    throw new Error('Codex webview 资源大小异常，已拒绝修改');
+    throw new Error('Codex 资源大小异常，已拒绝修改');
   }
   return fs.promises.readFile(assetPath, 'utf8');
+}
+
+async function resolveCodexFile(extensionRoot, candidatePath, label) {
+  const stat = await fs.promises.lstat(candidatePath);
+  if (stat.isSymbolicLink() || !stat.isFile()) {
+    throw new Error(`${label} 不是普通文件`);
+  }
+  const realPath = await fs.promises.realpath(candidatePath);
+  if (!isPathInside(extensionRoot, realPath)) {
+    throw new Error(`${label} 路径越界`);
+  }
+  return realPath;
+}
+
+async function inspectCodexSharedHistoryPatch() {
+  const codexExtension = vscode.extensions.getExtension(CODEX_EXTENSION_ID);
+  if (!codexExtension) {
+    return { status: 'not-installed' };
+  }
+
+  const version = String(codexExtension.packageJSON.version || 'unknown');
+  const extensionRoot = await fs.promises.realpath(codexExtension.extensionPath);
+  const hostPath = await resolveCodexFile(
+    extensionRoot,
+    path.join(extensionRoot, 'out', 'extension.js'),
+    'Codex 扩展主程序'
+  );
+  const hostSource = await readCodexAsset(hostPath);
+  const hostResult = patchSharedHistorySource(hostSource);
+  if (hostResult.status === 'unsupported') {
+    return { status: 'unsupported', version, reason: `扩展主程序：${hostResult.reason}` };
+  }
+
+  const assetsPath = path.join(extensionRoot, 'webview', 'assets');
+  const assetsStat = await fs.promises.lstat(assetsPath);
+  if (assetsStat.isSymbolicLink() || !assetsStat.isDirectory()) {
+    return { status: 'unsupported', version, reason: 'Codex webview assets 目录结构异常' };
+  }
+  const assetsRoot = await fs.promises.realpath(assetsPath);
+  if (!isPathInside(extensionRoot, assetsRoot)) {
+    return { status: 'unsupported', version, reason: 'Codex webview assets 路径越界' };
+  }
+
+  const historyAssets = [];
+  const assetNames = await fs.promises.readdir(assetsRoot);
+  for (const assetName of assetNames.filter((name) => HISTORY_ASSET_NAME.test(name))) {
+    const assetPath = await resolveCodexFile(
+      extensionRoot,
+      path.join(assetsRoot, assetName),
+      'Codex 历史资源'
+    );
+    const source = await readCodexAsset(assetPath);
+    if (source.includes(THREAD_LIST_MARKER)) {
+      historyAssets.push({ assetPath, source, result: patchSharedHistorySource(source) });
+    }
+  }
+
+  if (historyAssets.length !== 1) {
+    return {
+      status: 'unsupported',
+      version,
+      reason: `预期找到 1 个历史查询资源，实际找到 ${historyAssets.length} 个`
+    };
+  }
+  if (historyAssets[0].result.status === 'unsupported') {
+    return {
+      status: 'unsupported',
+      version,
+      reason: `历史查询资源：${historyAssets[0].result.reason}`
+    };
+  }
+
+  const inspectedTargets = [
+    { assetPath: hostPath, source: hostSource, result: hostResult },
+    historyAssets[0]
+  ];
+  const targets = inspectedTargets
+    .filter((target) => target.result.status === 'patched')
+    .map((target) => ({
+      assetPath: target.assetPath,
+      originalSource: target.source,
+      patchedSource: target.result.source,
+      replacementCount: target.result.replacementCount
+    }));
+
+  if (targets.length === 0) {
+    return { status: 'already-supported', version };
+  }
+  return {
+    status: 'ready',
+    version,
+    targets,
+    replacementCount: targets.reduce((total, target) => total + target.replacementCount, 0)
+  };
+}
+
+async function applyCodexSharedHistoryPatch(inspection) {
+  const verifiedTargets = [];
+  for (const target of inspection.targets) {
+    const currentSource = await readCodexAsset(target.assetPath);
+    const currentResult = patchSharedHistorySource(currentSource);
+    if (currentResult.status === 'already-supported') {
+      continue;
+    }
+    if (currentResult.status !== 'patched' || currentResult.source !== target.patchedSource) {
+      throw new Error('Codex 历史资源在确认后发生变化，已取消修复');
+    }
+    verifiedTargets.push({ ...target, originalSource: currentSource });
+  }
+
+  const writtenTargets = [];
+  try {
+    for (const target of verifiedTargets) {
+      const currentSource = await readCodexAsset(target.assetPath);
+      if (currentSource !== target.originalSource) {
+        throw new Error('Codex 历史资源在写入前发生变化，已取消修复');
+      }
+      await atomicWriteFile(target.assetPath, target.patchedSource);
+      writtenTargets.push(target);
+      const verification = patchSharedHistorySource(await readCodexAsset(target.assetPath));
+      if (verification.status !== 'already-supported') {
+        throw new Error('写入后的共享历史修复未通过结构校验');
+      }
+    }
+  } catch (error) {
+    const rollbackErrors = [];
+    for (const target of writtenTargets.reverse()) {
+      try {
+        const currentSource = await readCodexAsset(target.assetPath);
+        if (currentSource !== target.patchedSource) {
+          rollbackErrors.push('Codex 历史资源在回滚前被其他程序修改，已拒绝覆盖');
+          continue;
+        }
+        await atomicWriteFile(target.assetPath, target.originalSource);
+      } catch (rollbackError) {
+        rollbackErrors.push(errorMessage(rollbackError));
+      }
+    }
+    if (rollbackErrors.length > 0) {
+      throw new Error(`${errorMessage(error)}；回滚失败：${rollbackErrors.join('；')}`);
+    }
+    throw error;
+  }
+
+  return { status: writtenTargets.length > 0 ? 'patched' : 'already-supported' };
 }
 
 async function inspectCodexMaxPatch() {
@@ -829,7 +976,110 @@ async function finishMaxPatch(version) {
   }
 }
 
-async function ensureCodexMaxVisible(context, { manual = false } = {}) {
+async function requestSharedHistoryPatchConsent(context, version, replacementCount) {
+  const choice = await vscode.window.showWarningMessage(
+    '让 ChatGPT 账户与自定义 API 共享本地历史？',
+    {
+      modal: true,
+      detail: `Codex ${version} 的历史查询会把不同 Provider 的本地对话分开。\n\n修复会在严格校验后，把官方 Codex 扩展中 ${replacementCount} 个按当前 Provider 查询的参数统一改为空数组；不会读取、复制或修改任何对话记录。官方扩展更新会覆盖该修改，切换器可在再次校验后自动恢复。`
+    },
+    '共享历史并重载'
+  );
+  const accepted = choice === '共享历史并重载';
+  await context.globalState.update(HISTORY_PATCH_CONSENT_KEY, accepted || undefined);
+  await context.globalState.update(HISTORY_PATCH_DISMISSED_KEY, accepted ? undefined : true);
+  return accepted;
+}
+
+async function finishSharedHistoryPatch(version) {
+  const configuration = vscode.workspace.getConfiguration('labCodex');
+  if (configuration.get('autoReloadAfterSharedHistoryPatch', true)) {
+    scheduleWindowReload(`Codex ${version} 的账户/API 历史已合并显示，正在重载窗口…`);
+    return;
+  }
+  const action = await vscode.window.showInformationMessage(
+    `Codex ${version} 的账户/API 历史已合并显示；重载窗口后生效。`,
+    '立即重载'
+  );
+  if (action === '立即重载') {
+    scheduleWindowReload('Codex 共享历史修复已完成，正在重载窗口…');
+  }
+}
+
+async function ensureCodexSharedHistory(context, { manual = false, deferReload = false } = {}) {
+  const configuration = vscode.workspace.getConfiguration('labCodex');
+  if (!manual && !configuration.get('autoPatchSharedHistory', true)) {
+    return { status: 'disabled' };
+  }
+
+  let inspection;
+  try {
+    inspection = await inspectCodexSharedHistoryPatch();
+  } catch (error) {
+    inspection = { status: 'unsupported', version: 'unknown', reason: errorMessage(error) };
+  }
+
+  if (inspection.status === 'already-supported') {
+    if (manual) {
+      await vscode.window.showInformationMessage(
+        `Codex ${inspection.version} 已使用同一列表显示 ChatGPT 账户与自定义 API 历史。`
+      );
+    }
+    return inspection;
+  }
+  if (inspection.status === 'not-installed') {
+    if (manual) {
+      await vscode.window.showWarningMessage('未找到官方 OpenAI Codex VS Code 扩展。');
+    }
+    return inspection;
+  }
+  if (inspection.status !== 'ready') {
+    const warningKey = `shared-history-patch-warning:${inspection.version}`;
+    if (manual || context.globalState.get(warningKey) !== inspection.reason) {
+      await context.globalState.update(warningKey, inspection.reason);
+      await vscode.window.showWarningMessage(
+        `无法安全恢复 Codex ${inspection.version} 的账户/API 共享历史：${inspection.reason}`
+      );
+    }
+    return inspection;
+  }
+
+  let consented = context.globalState.get(HISTORY_PATCH_CONSENT_KEY) === true;
+  if (!consented) {
+    if (!manual && context.globalState.get(HISTORY_PATCH_DISMISSED_KEY) === true) {
+      return { status: 'declined', version: inspection.version };
+    }
+    consented = await requestSharedHistoryPatchConsent(
+      context,
+      inspection.version,
+      inspection.replacementCount
+    );
+    if (!consented) {
+      return { status: 'declined', version: inspection.version };
+    }
+  }
+
+  let result;
+  try {
+    result = await applyCodexSharedHistoryPatch(inspection);
+  } catch (error) {
+    const reason = errorMessage(error);
+    const warningKey = `shared-history-patch-write-warning:${inspection.version}`;
+    if (manual || context.globalState.get(warningKey) !== reason) {
+      await context.globalState.update(warningKey, reason);
+      await vscode.window.showWarningMessage(
+        `Codex ${inspection.version} 的共享历史修复写入失败：${reason}`
+      );
+    }
+    return { status: 'error', version: inspection.version, reason };
+  }
+  if (result.status === 'patched' && !deferReload) {
+    await finishSharedHistoryPatch(inspection.version);
+  }
+  return { ...result, version: inspection.version, feature: 'shared-history' };
+}
+
+async function ensureCodexMaxVisible(context, { manual = false, deferReload = false } = {}) {
   const configuration = vscode.workspace.getConfiguration('labCodex');
   if (!manual && !configuration.get('autoPatchMax', true)) {
     return { status: 'disabled' };
@@ -888,17 +1138,54 @@ async function ensureCodexMaxVisible(context, { manual = false } = {}) {
     }
     return { status: 'error', version: inspection.version, reason };
   }
-  if (result.status === 'patched') {
+  if (result.status === 'patched' && !deferReload) {
     await finishMaxPatch(inspection.version);
   }
-  return { ...result, version: inspection.version };
+  return { ...result, version: inspection.version, feature: 'max' };
 }
 
-function queueMaxPatchCheck(context) {
-  clearTimeout(patchCheckTimer);
-  patchCheckTimer = setTimeout(() => {
-    ensureCodexMaxVisible(context).catch((error) => {
-      console.error('Codex Max patch check failed', error);
+async function finishDeferredCompatibilityPatches(results) {
+  const patched = results.filter((result) => result && result.status === 'patched');
+  if (patched.length === 0) {
+    return;
+  }
+
+  const configuration = vscode.workspace.getConfiguration('labCodex');
+  const shouldAutoReload = patched.every((result) => (
+    result.feature === 'shared-history'
+      ? configuration.get('autoReloadAfterSharedHistoryPatch', true)
+      : configuration.get('autoReloadAfterMaxPatch', true)
+  ));
+  const labels = patched.map((result) => (
+    result.feature === 'shared-history' ? '账户/API 共享历史' : 'Max 推理等级'
+  ));
+  const summary = labels.join('、');
+  const version = patched.find((result) => result.version)?.version || 'unknown';
+
+  if (shouldAutoReload) {
+    scheduleWindowReload(`Codex ${version} 的${summary}修复已完成，正在重载窗口…`);
+    return;
+  }
+  const action = await vscode.window.showInformationMessage(
+    `Codex ${version} 的${summary}修复已完成；重载窗口后生效。`,
+    '立即重载'
+  );
+  if (action === '立即重载') {
+    scheduleWindowReload(`Codex ${summary}修复已完成，正在重载窗口…`);
+  }
+}
+
+async function runAutomaticCompatibilityRepairs(context) {
+  const historyResult = await ensureCodexSharedHistory(context, { deferReload: true });
+  const maxResult = await ensureCodexMaxVisible(context, { deferReload: true });
+  await finishDeferredCompatibilityPatches([historyResult, maxResult]);
+}
+
+function queueCompatibilityPatchCheck(context) {
+  clearTimeout(compatibilityPatchTimer);
+  compatibilityPatchTimer = setTimeout(() => {
+    runAutomaticCompatibilityRepairs(context).catch((error) => {
+      console.error('Codex compatibility patch check failed', error);
     });
   }, 1200);
 }
@@ -969,12 +1256,16 @@ async function activate(context) {
   registerSafeCommand(context, 'labCodex.configureLab', () => configureCustomApi(context));
   registerSafeCommand(context, 'labCodex.useAccount', () => useAccount(context));
   registerSafeCommand(context, 'labCodex.useLab', () => useCustomApi(context));
+  registerSafeCommand(context, 'labCodex.repairSharedHistory', () => {
+    assertWindows();
+    return ensureCodexSharedHistory(context, { manual: true });
+  });
   registerSafeCommand(context, 'labCodex.repairMaxOption', () => {
     assertWindows();
     return ensureCodexMaxVisible(context, { manual: true });
   });
   registerSafeCommand(context, 'labCodex.deleteLabKey', () => deleteCustomApiKey(context));
-  context.subscriptions.push(vscode.extensions.onDidChange(() => queueMaxPatchCheck(context)));
+  context.subscriptions.push(vscode.extensions.onDidChange(() => queueCompatibilityPatchCheck(context)));
 
   if (await legacySecretExists(context) && !(await secretExists(context))) {
     const warningKey = 'v2-bound-secret-migration-warning';
@@ -987,13 +1278,13 @@ async function activate(context) {
   if (process.platform !== 'win32') {
     await vscode.window.showWarningMessage('Codex Provider Switcher 当前仅支持 Windows DPAPI。');
   } else {
-    await ensureCodexMaxVisible(context);
+    await runAutomaticCompatibilityRepairs(context);
   }
   await updateStatus(context);
 }
 
 function deactivate() {
-  clearTimeout(patchCheckTimer);
+  clearTimeout(compatibilityPatchTimer);
 }
 
 module.exports = { activate, deactivate };

@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.2.0
+
+- Added a shared local history list for ChatGPT-account and custom-API conversations.
+- Added an explicit-consent repair that requests all providers from the current Codex `modelProviders` history filter without reading or rewriting conversation records.
+- Applied the history repair to both the extension host and webview paths with strict structural checks, post-write verification, and rollback.
+- Removed the non-atomic overwrite fallback so a failed replacement leaves the existing target intact and triggers rollback.
+- Added automatic revalidation after official Codex updates, a manual repair command, settings, documentation, and activation/rollback integration tests.
+
 ## 2.1.2
 
 - Removed the decorative Logo from the README while retaining it as the extension and Marketplace icon.
