@@ -9,6 +9,7 @@
 - Hardened managed TOML block removal, active-provider secret checks, DPAPI file replacement, reparse-point handling, and Max-patch rollback.
 - Rejected plaintext credential-bearing static headers, duplicate headers, and prototype-polluting property names.
 - Added routing, activation-conflict, rollback, configuration-integrity, and credential-binding regression tests.
+- Updated GitHub Actions to current Node 24-native releases pinned by immutable commit SHA.
 - Replaced documentation screenshots that exposed local conversation titles with sanitized versions.
 
 ## 2.2.0

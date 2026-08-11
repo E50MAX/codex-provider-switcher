@@ -52,6 +52,7 @@ const runtimeFiles = [
   path.join('lib', 'model-catalog.js'),
   path.join('lib', 'max-patch.js'),
   path.join('lib', 'history-patch.js'),
+  path.join('lib', 'transactional-write.js'),
   path.join('scripts', 'get-secret.ps1'),
   path.join('scripts', 'save-secret.ps1')
 ];
@@ -73,13 +74,13 @@ const requiredMaxPatchSafeguards = [
   /MAX_PATCH_CONSENT_KEY/,
   /markerFiles\.length !== 1/,
   /assetStat\.isSymbolicLink\(\)/,
-  /verification\.status !== 'already-patched'/,
+  /replaceVerified/,
   /patchMaxVisibilitySource/,
   /Max 资源在回滚前被其他程序修改/,
-  /writtenSource === currentResult\.source/
+  /currentSource === patchedSource/
 ];
 for (const pattern of requiredMaxPatchSafeguards) {
-  if (!pattern.test(extensionText)) {
+  if (!pattern.test(runtimeText)) {
     findings.push(`Max visibility repair is missing safeguard: ${pattern}`);
   }
 }
@@ -88,12 +89,12 @@ const requiredHistoryPatchSafeguards = [
   /HISTORY_PATCH_CONSENT_KEY/,
   /historyAssets\.length !== 1/,
   /resolveCodexFile/,
-  /verification\.status !== 'already-supported'/,
+  /writeVerifiedBatch/,
   /patchSharedHistorySource/,
   /currentSource !== target\.patchedSource/
 ];
 for (const pattern of requiredHistoryPatchSafeguards) {
-  if (!pattern.test(extensionText)) {
+  if (!pattern.test(runtimeText)) {
     findings.push(`Shared-history repair is missing safeguard: ${pattern}`);
   }
 }
@@ -161,6 +162,18 @@ for (const setting of ['labCodex.autoPatchSharedHistory', 'labCodex.autoPatchMax
   if (configurationProperties[setting]?.type !== 'boolean') {
     findings.push(`package.json is missing boolean repair setting: ${setting}`);
   }
+}
+
+const workflowText = fs.readFileSync(path.join(root, '.github', 'workflows', 'ci.yml'), 'utf8');
+const actionUses = [...workflowText.matchAll(/^\s*uses:\s*([^\s#]+)/gm)].map((match) => match[1]);
+if (actionUses.length === 0 || actionUses.some((value) => !/@[0-9a-f]{40}$/.test(value))) {
+  findings.push('GitHub Actions must be pinned to immutable 40-character commit SHAs');
+}
+if (!/^permissions:\s*\r?\n\s+contents:\s*read\s*$/m.test(workflowText)) {
+  findings.push('GitHub Actions workflow is missing read-only contents permissions');
+}
+if (/pull_request_target\s*:/m.test(workflowText)) {
+  findings.push('GitHub Actions workflow must not run untrusted code via pull_request_target');
 }
 
 const allowedFileEntries = new Set([

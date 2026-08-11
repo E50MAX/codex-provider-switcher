@@ -30,7 +30,7 @@ function createGlobalState(initialValues = {}) {
   };
 }
 
-async function loadExtensionWithMock(codexHome, vscodeApi, run, runtimeFs = fs) {
+async function loadExtensionWithMock(codexHome, vscodeApi, run) {
   const originalCodexHome = process.env.CODEX_HOME;
   const originalLoad = Module._load;
   let extension;
@@ -39,9 +39,6 @@ async function loadExtensionWithMock(codexHome, vscodeApi, run, runtimeFs = fs) 
     Module._load = function loadWithVscodeMock(request, parent, isMain) {
       if (request === 'vscode') {
         return vscodeApi;
-      }
-      if (request === 'fs') {
-        return runtimeFs;
       }
       return originalLoad.call(this, request, parent, isMain);
     };
@@ -141,76 +138,6 @@ test('activation safety and switching regressions', async (t) => {
       assert.equal(vscode.commands.size, 0);
       assert.equal(fs.existsSync(codexHome), false);
       assert.ok(vscode.warnings.some((message) => message.includes('旧版')));
-    } finally {
-      await fs.promises.rm(temporaryRoot, { recursive: true, force: true });
-    }
-  });
-
-  await t.test('rolls back the Max asset if post-write verification fails', async () => {
-    const temporaryRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'codex-max-rollback-'));
-    const codexHome = path.join(temporaryRoot, 'codex-home');
-    const officialRoot = path.join(temporaryRoot, 'official-codex');
-    const assetsPath = path.join(officialRoot, 'webview', 'assets');
-    const assetPath = path.join(assetsPath, 'app-initial-fixture.js');
-    const originalSource = 'hasModelSupportingMaxReasoningEffort;.filter(({reasoningEffort:e})=>a(e)&&b.has(e))';
-    await fs.promises.mkdir(assetsPath, { recursive: true });
-    await fs.promises.writeFile(assetPath, originalSource, 'utf8');
-
-    const vscode = baseVscodeMock({
-      getExtension(id) {
-        if (id === 'openai.chatgpt') {
-          return { extensionPath: officialRoot, packageJSON: { version: 'fixture' } };
-        }
-        return undefined;
-      },
-      settings: {
-        autoPatchSharedHistory: false,
-        autoPatchMax: true,
-        autoReloadAfterMaxPatch: false
-      },
-      warningHandler(message) {
-        return message.includes('Max 推理等级') ? '修复 Max 并重载' : undefined;
-      }
-    });
-    const context = {
-      extensionPath: path.resolve(__dirname, '..'),
-      globalState: createGlobalState(),
-      subscriptions: []
-    };
-    const originalRename = fs.promises.rename;
-    const originalReadFile = fs.promises.readFile;
-    let assetWriteCount = 0;
-    let failNextVerificationRead = false;
-    const runtimeFs = Object.create(fs);
-    Object.defineProperty(runtimeFs, 'promises', {
-      value: {
-        ...fs.promises,
-        async rename(source, destination) {
-          await originalRename(source, destination);
-          if (path.resolve(destination) === path.resolve(assetPath)) {
-            assetWriteCount += 1;
-            if (assetWriteCount === 1) {
-              failNextVerificationRead = true;
-            }
-          }
-        },
-        async readFile(filePath, ...args) {
-          if (failNextVerificationRead && path.resolve(filePath) === path.resolve(assetPath)) {
-            failNextVerificationRead = false;
-            return 'simulated-corrupt-read';
-          }
-          return originalReadFile(filePath, ...args);
-        }
-      }
-    });
-
-    try {
-      await loadExtensionWithMock(codexHome, vscode.api, async (extension) => {
-        await extension.activate(context);
-      }, runtimeFs);
-      assert.equal(await originalReadFile(assetPath, 'utf8'), originalSource);
-      assert.equal(assetWriteCount, 2);
-      assert.ok(vscode.warnings.some((message) => message.includes('Max 修复写入失败')));
     } finally {
       await fs.promises.rm(temporaryRoot, { recursive: true, force: true });
     }

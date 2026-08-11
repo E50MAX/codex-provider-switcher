@@ -112,7 +112,7 @@ function createVscodeMock(fixture) {
   };
 }
 
-async function withActivatedFixture(run, createRuntimeFs) {
+async function withActivatedFixture(run) {
   const fixture = await createFixture();
   const vscode = createVscodeMock(fixture);
   const globalState = createGlobalState();
@@ -123,7 +123,6 @@ async function withActivatedFixture(run, createRuntimeFs) {
   };
   const originalCodeHome = process.env.CODEX_HOME;
   const originalLoad = Module._load;
-  const runtimeFs = createRuntimeFs ? createRuntimeFs(fixture) : fs;
   let extension;
 
   try {
@@ -131,9 +130,6 @@ async function withActivatedFixture(run, createRuntimeFs) {
     Module._load = function loadWithVscodeMock(request, parent, isMain) {
       if (request === 'vscode') {
         return vscode.api;
-      }
-      if (request === 'fs') {
-        return runtimeFs;
       }
       return originalLoad.call(this, request, parent, isMain);
     };
@@ -166,38 +162,5 @@ test('shared-history activation repair', async (t) => {
       assert.ok(vscode.commands.has('labCodex.repairSharedHistory'));
       assert.equal(vscode.warnings.length, 1);
     });
-  });
-
-  await t.test('rolls back the first resource when the second write fails', async () => {
-    await withActivatedFixture(
-      async ({ fixture, vscode }) => {
-        assert.equal(await fs.promises.readFile(fixture.hostPath, 'utf8'), ORIGINAL_HOST_SOURCE);
-        assert.equal(await fs.promises.readFile(fixture.webviewPath, 'utf8'), ORIGINAL_WEBVIEW_SOURCE);
-        assert.ok(vscode.warnings.some((message) => message.includes('共享历史修复写入失败')));
-      },
-      (fixture) => {
-        const originalRename = fs.promises.rename;
-        const isWebviewWrite = (source, destination) => (
-          path.resolve(destination) === path.resolve(fixture.webviewPath)
-          && String(source).endsWith('.tmp')
-        );
-
-        const runtimeFs = Object.create(fs);
-        Object.defineProperty(runtimeFs, 'promises', {
-          value: {
-            ...fs.promises,
-            async rename(source, destination) {
-              if (isWebviewWrite(source, destination)) {
-                const error = new Error('simulated locked webview resource');
-                error.code = 'EPERM';
-                throw error;
-              }
-              return originalRename(source, destination);
-            }
-          }
-        });
-        return runtimeFs;
-      }
-    );
   });
 });

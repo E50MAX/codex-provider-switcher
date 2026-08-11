@@ -31,6 +31,7 @@ const {
   removeManagedBlock,
   setTopLevelValue: setConfigTopLevelValue
 } = require('./lib/config-text');
+const { replaceVerified, writeVerifiedBatch } = require('./lib/transactional-write');
 
 const PROVIDER_ID = 'lab_relay';
 const MANAGED_BEGIN = '# >>> codex-provider-switcher: lab_relay >>>';
@@ -884,41 +885,21 @@ async function applyCodexSharedHistoryPatch(inspection) {
     verifiedTargets.push({ ...target, originalSource: currentSource });
   }
 
-  const writtenTargets = [];
-  try {
-    for (const target of verifiedTargets) {
-      const currentSource = await readCodexAsset(target.assetPath);
-      if (currentSource !== target.originalSource) {
-        throw new Error('Codex 历史资源在写入前发生变化，已取消修复');
-      }
-      await atomicWriteFile(target.assetPath, target.patchedSource);
-      writtenTargets.push(target);
-      const verification = patchSharedHistorySource(await readCodexAsset(target.assetPath));
-      if (verification.status !== 'already-supported') {
-        throw new Error('写入后的共享历史修复未通过结构校验');
-      }
-    }
-  } catch (error) {
-    const rollbackErrors = [];
-    for (const target of writtenTargets.reverse()) {
-      try {
-        const currentSource = await readCodexAsset(target.assetPath);
-        if (currentSource !== target.patchedSource) {
-          rollbackErrors.push('Codex 历史资源在回滚前被其他程序修改，已拒绝覆盖');
-          continue;
-        }
-        await atomicWriteFile(target.assetPath, target.originalSource);
-      } catch (rollbackError) {
-        rollbackErrors.push(errorMessage(rollbackError));
-      }
-    }
-    if (rollbackErrors.length > 0) {
-      throw new Error(`${errorMessage(error)}；回滚失败：${rollbackErrors.join('；')}`);
-    }
-    throw error;
-  }
+  const writtenCount = await writeVerifiedBatch({
+    targets: verifiedTargets.map((target) => ({
+      filePath: target.assetPath,
+      originalSource: target.originalSource,
+      patchedSource: target.patchedSource
+    })),
+    readFile: readCodexAsset,
+    writeFile: atomicWriteFile,
+    verify: (source) => patchSharedHistorySource(source).status === 'already-supported',
+    changedBeforeWriteError: 'Codex 历史资源在写入前发生变化，已取消修复',
+    verificationError: '写入后的共享历史修复未通过结构校验',
+    rollbackConflictError: 'Codex 历史资源在回滚前被其他程序修改，已拒绝覆盖'
+  });
 
-  return { status: writtenTargets.length > 0 ? 'patched' : 'already-supported' };
+  return { status: writtenCount > 0 ? 'patched' : 'already-supported' };
 }
 
 async function inspectCodexMaxPatch() {
@@ -991,25 +972,16 @@ async function applyCodexMaxPatch(inspection) {
     throw new Error('Codex webview 在确认后发生变化，已取消修复');
   }
 
-  try {
-    await atomicWriteFile(inspection.assetPath, currentResult.source);
-    const verification = patchMaxVisibilitySource(await readCodexAsset(inspection.assetPath));
-    if (verification.status !== 'already-patched') {
-      throw new Error('写入后的 Max 修复未通过结构校验');
-    }
-  } catch (error) {
-    try {
-      const writtenSource = await readCodexAsset(inspection.assetPath);
-      if (writtenSource === currentResult.source) {
-        await atomicWriteFile(inspection.assetPath, currentSource);
-      } else if (writtenSource !== currentSource) {
-        throw new Error('Codex Max 资源在回滚前被其他程序修改，已拒绝覆盖');
-      }
-    } catch (rollbackError) {
-      throw new Error(`${errorMessage(error)}；回滚失败：${errorMessage(rollbackError)}`);
-    }
-    throw error;
-  }
+  await replaceVerified({
+    filePath: inspection.assetPath,
+    originalSource: currentSource,
+    patchedSource: currentResult.source,
+    readFile: readCodexAsset,
+    writeFile: atomicWriteFile,
+    verify: (source) => patchMaxVisibilitySource(source).status === 'already-patched',
+    verificationError: '写入后的 Max 修复未通过结构校验',
+    rollbackConflictError: 'Codex Max 资源在回滚前被其他程序修改，已拒绝覆盖'
+  });
   return { status: 'patched' };
 }
 
