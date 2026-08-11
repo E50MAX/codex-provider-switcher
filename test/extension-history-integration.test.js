@@ -112,7 +112,7 @@ function createVscodeMock(fixture) {
   };
 }
 
-async function withActivatedFixture(run, mutateFileSystem) {
+async function withActivatedFixture(run, createRuntimeFs) {
   const fixture = await createFixture();
   const vscode = createVscodeMock(fixture);
   const globalState = createGlobalState();
@@ -123,17 +123,17 @@ async function withActivatedFixture(run, mutateFileSystem) {
   };
   const originalCodeHome = process.env.CODEX_HOME;
   const originalLoad = Module._load;
-  let restoreFileSystem = () => {};
+  const runtimeFs = createRuntimeFs ? createRuntimeFs(fixture) : fs;
   let extension;
 
   try {
     process.env.CODEX_HOME = fixture.codexHome;
-    if (mutateFileSystem) {
-      restoreFileSystem = mutateFileSystem(fixture);
-    }
     Module._load = function loadWithVscodeMock(request, parent, isMain) {
       if (request === 'vscode') {
         return vscode.api;
+      }
+      if (request === 'fs') {
+        return runtimeFs;
       }
       return originalLoad.call(this, request, parent, isMain);
     };
@@ -145,7 +145,6 @@ async function withActivatedFixture(run, mutateFileSystem) {
     extension?.deactivate();
     delete require.cache[extensionModulePath];
     Module._load = originalLoad;
-    restoreFileSystem();
     if (originalCodeHome === undefined) {
       delete process.env.CODEX_HOME;
     } else {
@@ -183,18 +182,21 @@ test('shared-history activation repair', async (t) => {
           && String(source).endsWith('.tmp')
         );
 
-        fs.promises.rename = async (source, destination) => {
-          if (isWebviewWrite(source, destination)) {
-            const error = new Error('simulated locked webview resource');
-            error.code = 'EPERM';
-            throw error;
+        const runtimeFs = Object.create(fs);
+        Object.defineProperty(runtimeFs, 'promises', {
+          value: {
+            ...fs.promises,
+            async rename(source, destination) {
+              if (isWebviewWrite(source, destination)) {
+                const error = new Error('simulated locked webview resource');
+                error.code = 'EPERM';
+                throw error;
+              }
+              return originalRename(source, destination);
+            }
           }
-          return originalRename(source, destination);
-        };
-
-        return () => {
-          fs.promises.rename = originalRename;
-        };
+        });
+        return runtimeFs;
       }
     );
   });

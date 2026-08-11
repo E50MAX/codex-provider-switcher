@@ -30,7 +30,7 @@ function createGlobalState(initialValues = {}) {
   };
 }
 
-async function loadExtensionWithMock(codexHome, vscodeApi, run) {
+async function loadExtensionWithMock(codexHome, vscodeApi, run, runtimeFs = fs) {
   const originalCodexHome = process.env.CODEX_HOME;
   const originalLoad = Module._load;
   let extension;
@@ -39,6 +39,9 @@ async function loadExtensionWithMock(codexHome, vscodeApi, run) {
     Module._load = function loadWithVscodeMock(request, parent, isMain) {
       if (request === 'vscode') {
         return vscodeApi;
+      }
+      if (request === 'fs') {
+        return runtimeFs;
       }
       return originalLoad.call(this, request, parent, isMain);
     };
@@ -178,34 +181,37 @@ test('activation safety and switching regressions', async (t) => {
     const originalReadFile = fs.promises.readFile;
     let assetWriteCount = 0;
     let failNextVerificationRead = false;
-
-    fs.promises.rename = async (source, destination) => {
-      await originalRename(source, destination);
-      if (path.resolve(destination) === path.resolve(assetPath)) {
-        assetWriteCount += 1;
-        if (assetWriteCount === 1) {
-          failNextVerificationRead = true;
+    const runtimeFs = Object.create(fs);
+    Object.defineProperty(runtimeFs, 'promises', {
+      value: {
+        ...fs.promises,
+        async rename(source, destination) {
+          await originalRename(source, destination);
+          if (path.resolve(destination) === path.resolve(assetPath)) {
+            assetWriteCount += 1;
+            if (assetWriteCount === 1) {
+              failNextVerificationRead = true;
+            }
+          }
+        },
+        async readFile(filePath, ...args) {
+          if (failNextVerificationRead && path.resolve(filePath) === path.resolve(assetPath)) {
+            failNextVerificationRead = false;
+            return 'simulated-corrupt-read';
+          }
+          return originalReadFile(filePath, ...args);
         }
       }
-    };
-    fs.promises.readFile = async (filePath, ...args) => {
-      if (failNextVerificationRead && path.resolve(filePath) === path.resolve(assetPath)) {
-        failNextVerificationRead = false;
-        return 'simulated-corrupt-read';
-      }
-      return originalReadFile(filePath, ...args);
-    };
+    });
 
     try {
       await loadExtensionWithMock(codexHome, vscode.api, async (extension) => {
         await extension.activate(context);
-      });
+      }, runtimeFs);
       assert.equal(await originalReadFile(assetPath, 'utf8'), originalSource);
       assert.equal(assetWriteCount, 2);
       assert.ok(vscode.warnings.some((message) => message.includes('Max 修复写入失败')));
     } finally {
-      fs.promises.rename = originalRename;
-      fs.promises.readFile = originalReadFile;
       await fs.promises.rm(temporaryRoot, { recursive: true, force: true });
     }
   });
