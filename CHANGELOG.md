@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.2.2
+
+- Replaced Node-version-dependent filesystem fault mocks with a production transactional-write helper and deterministic in-memory rollback tests.
+- Verified single-file rollback, multi-file rollback, and refusal to overwrite an externally changed file.
+- Updated GitHub Actions to current Node 24-native releases pinned by immutable commit SHA.
+- Carries forward the provider-routing, privacy, and credential hardening prepared for 2.2.1.
+
 ## 2.2.1
 
 - Fixed provider-switch routing ambiguity: after reload, the extension now opens a fresh official Codex chat bound by the new default provider.
@@ -9,7 +16,6 @@
 - Hardened managed TOML block removal, active-provider secret checks, DPAPI file replacement, reparse-point handling, and Max-patch rollback.
 - Rejected plaintext credential-bearing static headers, duplicate headers, and prototype-polluting property names.
 - Added routing, activation-conflict, rollback, configuration-integrity, and credential-binding regression tests.
-- Updated GitHub Actions to current Node 24-native releases pinned by immutable commit SHA.
 - Replaced documentation screenshots that exposed local conversation titles with sanitized versions.
 
 ## 2.2.0

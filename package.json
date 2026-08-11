@@ -2,7 +2,7 @@
   "name": "codex-provider-switcher",
   "displayName": "Secure Codex Provider Switcher (Unofficial)",
   "description": "安全切换新 Codex 对话的 ChatGPT 账户与自定义 HTTPS Responses API，合并显示本地历史列表。",
-  "version": "2.2.1",
+  "version": "2.2.2",
   "publisher": "e50max",
   "author": {
     "name": "E50MAX"

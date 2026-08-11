@@ -190,7 +190,7 @@ API Key 会用当前 Windows 用户的 DPAPI 加密，并与这条完整 HTTPS B
 
 这通常表示你继续打开了一个由 `openai` 账户 Provider 创建的旧会话。状态栏只表示新对话默认连接，不能证明当前旧会话已经迁移。
 
-重新执行 `Codex: 使用自定义 API`，等待窗口重载，然后直接使用扩展自动打开的空白对话。不要从历史列表重新点回原账户会话。2.2.1 会在每次切换后自动执行官方的 **New Chat** 命令，专门避免这种误用。
+重新执行 `Codex: 使用自定义 API`，等待窗口重载，然后直接使用扩展自动打开的空白对话。不要从历史列表重新点回原账户会话。2.2.1 及以上版本会在每次切换后自动执行官方的 **New Chat** 命令，专门避免这种误用。
 
 官方 Codex 在 API 模式下仍可能为登录状态、模型目录或界面信息执行账户侧后台请求，因此日志中偶尔出现账户额度警告不一定代表新对话走错连接；判断实际路由时，应以新对话能否独立完成请求为准。
 
@@ -218,7 +218,7 @@ API Key 会用当前 Windows 用户的 DPAPI 加密，并与这条完整 HTTPS B
 
 OpenAI App Server 的 `thread/list` 接口支持通过 `modelProviders` 过滤本地会话。当前官方 VS Code 扩展在若干历史查询中只取当前 Provider，因此账户和 API 的本地会话会分开显示。本扩展把经过验证的查询改为请求全部 Provider；不移动会话文件，也不读写历史数据库。参见 [OpenAI Codex App Server](https://learn.chatgpt.com/docs/app-server)。
 
-共享的是“历史入口”，不是两边服务端的数据同步，也不是 Provider 迁移。App Server 返回的每个 thread 都带有 `modelProvider`；恢复旧 thread 会继续该会话，而切换器不会改写其数据库记录。2.2.1 在切换后自动打开新对话，让新 thread 按新配置创建。需要把旧上下文带到另一 Provider 时，请先检查敏感信息，再手动整理必要内容到新对话。
+共享的是“历史入口”，不是两边服务端的数据同步，也不是 Provider 迁移。App Server 返回的每个 thread 都带有 `modelProvider`；恢复旧 thread 会继续该会话，而切换器不会改写其数据库记录。2.2.1 及以上版本在切换后自动打开新对话，让新 thread 按新配置创建。需要把旧上下文带到另一 Provider 时，请先检查敏感信息，再手动整理必要内容到新对话。
 
 ### Max 推理等级
 
