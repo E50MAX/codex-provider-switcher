@@ -17,6 +17,11 @@ It provides the following controls:
 - explicit one-time consent before repairing the official Codex model picker's Max filter;
 - path, file-type, size, marker-count, replacement-count, and post-write checks around both repairs;
 - transactional writes and best-effort rollback when the shared-history repair spans two official Codex resources.
+- refusal to activate alongside the legacy extension id that can claim the same commands;
+- rejection of plaintext credential-bearing static headers and ambiguous JavaScript object-property names;
+- strict managed-block boundaries and an active-provider check before the DPAPI secret can be decrypted;
+- reparse-point checks and atomic replacement for the encrypted secret;
+- a fresh official Codex chat after each provider switch, so an already loaded thread is not mistaken for the new route.
 
 ## Important limitations
 
@@ -24,7 +29,9 @@ The extension configures Codex, but Codex owns the actual network connection. Th
 
 To display ChatGPT-account and custom-API conversations in one local history list, the extension can modify the installed official Codex extension's bundled host program and one minified webview asset. The repair only changes validated provider-filtering `modelProviders` history-query parameters to empty arrays. It does not read, copy, migrate, or write Codex conversation records or its history database. This is a local visibility repair, not cloud synchronization.
 
-When a conversation created through one provider is resumed while another provider is selected, Codex may send existing messages and context from that conversation to the currently selected provider. Users must verify the status-bar connection before continuing sensitive conversations. Shared visibility does not make providers equally trusted.
+Codex stores a `modelProvider` on each conversation. Shared-history repair only makes those conversations visible together; it does not rewrite that field. An old or already loaded conversation can therefore continue using its original provider even when the switcher's status bar names a different default for new conversations. After every switch, the extension reloads the window and opens a fresh official Codex chat. Use that new chat when provider routing or quota isolation matters. The status bar must not be treated as proof of an old thread's route.
+
+The extension deliberately does not edit Codex's conversation database or rollout files to force a migration. Carrying old context into a different provider must be an explicit user action, because it can disclose messages, source code, and tool output to a service with a different trust boundary.
 
 To expose a model-catalog entry's `max` reasoning level in the current Codex VS Code UI, the extension can modify one minified webview asset inside the installed official Codex extension. This is opt-in. The repair proceeds only when one known structural pattern matches exactly once, and it is refused after any unrecognized upstream change. An official Codex update replaces the modified asset; if automatic repair remains enabled, the extension checks the new version again before writing. VS Code or endpoint-security software may still report a modified extension installation. Reinstalling or updating the official Codex extension restores its original files.
 

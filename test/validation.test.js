@@ -45,6 +45,10 @@ test('validates model IDs and header maps', () => {
   assert.deepEqual(normalizeHeaderMap({ 'X-Feature': 'enabled' }), { 'X-Feature': 'enabled' });
   assert.throws(() => normalizeHeaderMap({ 'Bad Header': 'value' }));
   assert.throws(() => normalizeHeaderMap({ 'X-Test': 'value\r\ninjected: true' }));
+  assert.throws(() => normalizeHeaderMap({ Authorization: 'Bearer plaintext' }), /DPAPI/);
+  assert.throws(() => normalizeHeaderMap({ 'X-API-Key': 'plaintext' }), /DPAPI/);
+  assert.throws(() => normalizeHeaderMap({ 'X-Test': 'one', 'x-test': 'two' }), /重复/);
+  assert.throws(() => normalizeHeaderMap(JSON.parse('{"__proto__":"value"}')), /歧义/);
 });
 
 test('supports Ultra and canonical reasoning-effort presets', () => {

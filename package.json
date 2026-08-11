@@ -1,8 +1,8 @@
 {
   "name": "codex-provider-switcher",
   "displayName": "Secure Codex Provider Switcher (Unofficial)",
-  "description": "安全切换 ChatGPT 账户与自定义 HTTPS Responses API，共用本地历史并选择中转模型和推理等级。",
-  "version": "2.2.0",
+  "description": "安全切换新 Codex 对话的 ChatGPT 账户与自定义 HTTPS Responses API，合并显示本地历史列表。",
+  "version": "2.2.1",
   "publisher": "e50max",
   "author": {
     "name": "E50MAX"
@@ -104,7 +104,7 @@
         "labCodex.autoReload": {
           "type": "boolean",
           "default": true,
-          "description": "切换 provider 后自动重载 VS Code 窗口，使新连接立即生效。"
+          "description": "切换 provider 后自动重载 VS Code 窗口，并打开一个使用新连接的空白 Codex 对话。"
         },
         "labCodex.autoPatchSharedHistory": {
           "type": "boolean",

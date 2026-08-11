@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.2.1
+
+- Fixed provider-switch routing ambiguity: after reload, the extension now opens a fresh official Codex chat bound by the new default provider.
+- Relabeled the status bar and switch menu as the connection for **new conversations**; shared history no longer implies that an old thread's `modelProvider` was migrated.
+- Added an immediate real-switch action after saving custom API settings.
+- Refused activation when the legacy extension id that can claim the same commands is still installed.
+- Hardened managed TOML block removal, active-provider secret checks, DPAPI file replacement, reparse-point handling, and Max-patch rollback.
+- Rejected plaintext credential-bearing static headers, duplicate headers, and prototype-polluting property names.
+- Added routing, activation-conflict, rollback, configuration-integrity, and credential-binding regression tests.
+- Replaced documentation screenshots that exposed local conversation titles with sanitized versions.
+
 ## 2.2.0
 
 - Added a shared local history list for ChatGPT-account and custom-API conversations.

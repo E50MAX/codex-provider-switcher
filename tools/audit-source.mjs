@@ -74,7 +74,9 @@ const requiredMaxPatchSafeguards = [
   /markerFiles\.length !== 1/,
   /assetStat\.isSymbolicLink\(\)/,
   /verification\.status !== 'already-patched'/,
-  /patchMaxVisibilitySource/
+  /patchMaxVisibilitySource/,
+  /Max 资源在回滚前被其他程序修改/,
+  /writtenSource === currentResult\.source/
 ];
 for (const pattern of requiredMaxPatchSafeguards) {
   if (!pattern.test(extensionText)) {
@@ -93,6 +95,38 @@ const requiredHistoryPatchSafeguards = [
 for (const pattern of requiredHistoryPatchSafeguards) {
   if (!pattern.test(extensionText)) {
     findings.push(`Shared-history repair is missing safeguard: ${pattern}`);
+  }
+}
+
+const requiredCredentialSafeguards = [
+  /Managed provider is not the active model provider/,
+  /Managed provider markers are missing or ambiguous/,
+  /Encrypted secret file has an invalid size/,
+  /Refusing to store a secret inside a reparse-point directory/
+];
+for (const pattern of requiredCredentialSafeguards) {
+  if (!pattern.test(runtimeText)) {
+    findings.push(`Credential handling is missing safeguard: ${pattern}`);
+  }
+}
+
+if (/\[System\.IO\.File\]::Delete\(\$SecretPath\)/.test(runtimeText)) {
+  findings.push('Credential replacement contains a delete-before-move fallback');
+}
+
+if (!/LEGACY_EXTENSION_ID/.test(extensionText) || !/stopForLegacyExtensionConflict/.test(extensionText)) {
+  findings.push('Legacy extension collision guard is missing');
+}
+
+const requiredRoutingSafeguards = [
+  /PENDING_FRESH_CHAT_KEY/,
+  /executeCommand\('chatgpt\.newChat'\)/,
+  /Codex 新对话: API/,
+  /旧会话不会迁移 Provider/
+];
+for (const pattern of requiredRoutingSafeguards) {
+  if (!pattern.test(extensionText)) {
+    findings.push(`Provider routing is missing a fresh-chat safeguard: ${pattern}`);
   }
 }
 

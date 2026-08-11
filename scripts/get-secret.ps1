@@ -37,19 +37,57 @@ $configInfo = [System.IO.FileInfo]::new($ConfigPath)
 if ($configInfo.Length -gt 5MB) {
     throw 'Codex configuration file is unexpectedly large.'
 }
+$secretInfo = [System.IO.FileInfo]::new($SecretPath)
+if ($secretInfo.Length -le 0 -or $secretInfo.Length -gt 64KB) {
+    throw 'Encrypted secret file has an invalid size.'
+}
 
 $configText = [System.IO.File]::ReadAllText($ConfigPath, [System.Text.Encoding]::UTF8)
+$managedBegin = '# >>> codex-provider-switcher: ' + $ProviderId + ' >>>'
+$managedEnd = '# <<< codex-provider-switcher: ' + $ProviderId + ' <<<'
+$managedBeginPattern = '(?m)^\s*' + [System.Text.RegularExpressions.Regex]::Escape($managedBegin) + '\s*$'
+$managedEndPattern = '(?m)^\s*' + [System.Text.RegularExpressions.Regex]::Escape($managedEnd) + '\s*$'
+$managedBeginMatches = [System.Text.RegularExpressions.Regex]::Matches($configText, $managedBeginPattern)
+$managedEndMatches = [System.Text.RegularExpressions.Regex]::Matches($configText, $managedEndPattern)
+if ($managedBeginMatches.Count -ne 1 -or $managedEndMatches.Count -ne 1 -or
+    $managedEndMatches[0].Index -le $managedBeginMatches[0].Index) {
+    throw 'Managed provider markers are missing or ambiguous.'
+}
+
+$firstTableMatch = [System.Text.RegularExpressions.Regex]::Match($configText, '(?m)^\s*\[')
+$topLevelText = if ($firstTableMatch.Success) {
+    $configText.Substring(0, $firstTableMatch.Index)
+}
+else {
+    $configText
+}
+$modelProviderPattern = '(?m)^\s*model_provider\s*=\s*(?<value>"(?:\\.|[^"\\])*")\s*$'
+$modelProviderMatches = [System.Text.RegularExpressions.Regex]::Matches($topLevelText, $modelProviderPattern)
+if ($modelProviderMatches.Count -ne 1) {
+    throw 'Active model provider is missing or ambiguous.'
+}
+$activeProvider = ConvertFrom-Json -InputObject $modelProviderMatches[0].Groups['value'].Value
+if (-not [string]::Equals($activeProvider, $ProviderId, [System.StringComparison]::Ordinal)) {
+    throw 'Managed provider is not the active model provider.'
+}
+
 $providerPattern = '(?ms)^\[model_providers\.' + [System.Text.RegularExpressions.Regex]::Escape($ProviderId) + '\]\s*(?<body>.*?)(?=^\[|\z)'
-$providerMatch = [System.Text.RegularExpressions.Regex]::Match($configText, $providerPattern)
-if (-not $providerMatch.Success) {
-    throw 'Managed provider configuration was not found.'
+$providerMatches = [System.Text.RegularExpressions.Regex]::Matches($configText, $providerPattern)
+if ($providerMatches.Count -ne 1) {
+    throw 'Managed provider configuration was not found or is ambiguous.'
+}
+$providerMatch = $providerMatches[0]
+if ($providerMatch.Index -le $managedBeginMatches[0].Index -or
+    $providerMatch.Index -ge $managedEndMatches[0].Index) {
+    throw 'Managed provider configuration is outside its integrity markers.'
 }
 
 $baseUrlPattern = '(?m)^\s*base_url\s*=\s*(?<value>"(?:\\.|[^"\\])*")\s*$'
-$baseUrlMatch = [System.Text.RegularExpressions.Regex]::Match($providerMatch.Groups['body'].Value, $baseUrlPattern)
-if (-not $baseUrlMatch.Success) {
-    throw 'Managed provider Base URL was not found.'
+$baseUrlMatches = [System.Text.RegularExpressions.Regex]::Matches($providerMatch.Groups['body'].Value, $baseUrlPattern)
+if ($baseUrlMatches.Count -ne 1) {
+    throw 'Managed provider Base URL was not found or is ambiguous.'
 }
+$baseUrlMatch = $baseUrlMatches[0]
 
 $configuredBaseUrl = ConvertFrom-Json -InputObject $baseUrlMatch.Groups['value'].Value
 if (-not [string]::Equals($configuredBaseUrl, $Binding, [System.StringComparison]::Ordinal)) {

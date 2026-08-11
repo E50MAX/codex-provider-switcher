@@ -27,14 +27,25 @@ windowsTest('DPAPI key is bound to the configured HTTPS Base URL', () => {
   const trustedBaseUrl = 'https://gateway.example.com/v1';
   const otherBaseUrl = 'https://other.example.com/v1';
   const apiKey = 'test_key_1234567890';
+  const managedBegin = `# >>> codex-provider-switcher: ${providerId} >>>`;
+  const managedEnd = `# <<< codex-provider-switcher: ${providerId} <<<`;
 
-  try {
+  const writeConfig = (activeProvider, baseUrl, extraLines = []) => {
     fs.writeFileSync(configPath, [
+      `model_provider = ${JSON.stringify(activeProvider)}`,
+      '',
+      managedBegin,
       `[model_providers.${providerId}]`,
-      `base_url = ${JSON.stringify(trustedBaseUrl)}`,
+      `base_url = ${JSON.stringify(baseUrl)}`,
       'wire_api = "responses"',
+      ...extraLines,
+      managedEnd,
       ''
     ].join('\n'));
+  };
+
+  try {
+    writeConfig(providerId, trustedBaseUrl);
 
     const save = runPowerShell(
       saveScript,
@@ -52,12 +63,7 @@ windowsTest('DPAPI key is bound to the configured HTTPS Base URL', () => {
     assert.equal(read.status, 0, read.stderr);
     assert.equal(read.stdout, apiKey);
 
-    fs.writeFileSync(configPath, [
-      `[model_providers.${providerId}]`,
-      `base_url = ${JSON.stringify(otherBaseUrl)}`,
-      'wire_api = "responses"',
-      ''
-    ].join('\n'));
+    writeConfig(providerId, otherBaseUrl);
 
     const tamperedConfig = runPowerShell(getScript, [
       '-SecretPath', secretPath,
@@ -76,6 +82,26 @@ windowsTest('DPAPI key is bound to the configured HTTPS Base URL', () => {
     ]);
     assert.notEqual(changedBinding.status, 0);
     assert.equal(changedBinding.stdout, '');
+
+    writeConfig('openai', trustedBaseUrl);
+    const inactiveProvider = runPowerShell(getScript, [
+      '-SecretPath', secretPath,
+      '-Binding', trustedBaseUrl,
+      '-ConfigPath', configPath,
+      '-ProviderId', providerId
+    ]);
+    assert.notEqual(inactiveProvider.status, 0);
+    assert.equal(inactiveProvider.stdout, '');
+
+    writeConfig(providerId, trustedBaseUrl, [managedBegin]);
+    const ambiguousMarkers = runPowerShell(getScript, [
+      '-SecretPath', secretPath,
+      '-Binding', trustedBaseUrl,
+      '-ConfigPath', configPath,
+      '-ProviderId', providerId
+    ]);
+    assert.notEqual(ambiguousMarkers.status, 0);
+    assert.equal(ambiguousMarkers.stdout, '');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

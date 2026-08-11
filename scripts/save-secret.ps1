@@ -25,6 +25,16 @@ if ($apiKey.Length -gt 8192 -or [System.Text.RegularExpressions.Regex]::IsMatch(
 
 $directory = [System.IO.Path]::GetDirectoryName($SecretPath)
 [System.IO.Directory]::CreateDirectory($directory) | Out-Null
+$directoryAttributes = [System.IO.File]::GetAttributes($directory)
+if (($directoryAttributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+    throw 'Refusing to store a secret inside a reparse-point directory.'
+}
+if ([System.IO.File]::Exists($SecretPath)) {
+    $secretAttributes = [System.IO.File]::GetAttributes($SecretPath)
+    if (($secretAttributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw 'Refusing to replace a secret reparse point.'
+    }
+}
 
 $plainBytes = $null
 $bindingBytes = $null
@@ -46,13 +56,7 @@ try {
 
     [System.IO.File]::WriteAllBytes($temporaryPath, $encryptedBytes)
     if ([System.IO.File]::Exists($SecretPath)) {
-        try {
-            [System.IO.File]::Replace($temporaryPath, $SecretPath, $null, $true)
-        }
-        catch {
-            [System.IO.File]::Delete($SecretPath)
-            [System.IO.File]::Move($temporaryPath, $SecretPath)
-        }
+        [System.IO.File]::Replace($temporaryPath, $SecretPath, $null, $true)
     }
     else {
         [System.IO.File]::Move($temporaryPath, $SecretPath)

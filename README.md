@@ -5,7 +5,9 @@
 - 已登录的 ChatGPT 账户；
 - 你自己信任的 HTTPS Responses API 中转站。
 
-两种连接使用同一个 `CODEX_HOME`，并可在官方 Codex 中显示同一份本地历史列表。已有会话不需要导出、复制或迁移；切换连接后仍可找到并打开另一种连接创建的本地会话。
+两种连接使用同一个 `CODEX_HOME`，并可在官方 Codex 中显示同一份本地历史列表。已有会话不需要导出或复制；切换连接后仍可找到另一种连接创建的本地会话。
+
+> **历史列表共享不等于会话 Provider 迁移。** Codex 会在每个会话中记录 `modelProvider`。为避免旧账户会话继续消耗账户额度，切换器在每次切换并重载后都会自动打开一个空白新对话；请在这个新对话中发送第一条消息。状态栏显示的是“新对话连接”，不是已经打开的旧会话实际连接。
 
 配置中转站时只需要填写 **HTTPS Base URL** 和 **API Key**。模型与推理等级不再手工输入，切换完成后直接在官方 Codex 输入框下方选择。
 
@@ -70,7 +72,7 @@ code --install-extension e50max.codex-provider-switcher
 
 > 共享范围仅限当前电脑、同一 `CODEX_HOME` 下的 Codex 本地会话。它不会把 API 会话上传到 ChatGPT，也不包含 `chatgpt.com` 或 ChatGPT 客户端的云端聊天记录。
 
-切换连接会重载窗口。重载后再打开旧会话，后续请求使用状态栏显示的当前连接；Codex 可能把该会话已有的消息和上下文一并发给当前 Provider。继续敏感会话前，请先确认状态栏和目标服务方。
+这项修复只合并历史列表，不迁移旧会话记录的 Provider，也不保证旧会话改走状态栏所示连接。切换器会在切换并重载后自动打开新对话；需要确定请求走新连接时，请使用这个空白对话。继续旧会话前，应按它原来使用的 Provider 判断额度、隐私和信任边界。
 
 ## 四、第一次出现 Max 修复提示
 
@@ -94,7 +96,7 @@ code --install-extension e50max.codex-provider-switcher
 
 有两种打开方法：
 
-- 点击 VS Code **右下角状态栏**里的 `Codex: ChatGPT 账户` 或 `Codex: 自定义 API`；
+- 点击 VS Code **右下角状态栏**里的 `Codex 新对话: 账户` 或 `Codex 新对话: API`；
 - 按 `Ctrl+Shift+P`，输入并运行 `Codex: 切换账户 / 自定义 API`。
 
 第一次配置时，点击 **配置自定义 API**。
@@ -132,12 +134,14 @@ API Key 会用当前 Windows 用户的 DPAPI 加密，并与这条完整 HTTPS B
 
 ### 第 5 步：真正切换到自定义 API
 
-配置成功只代表“地址和密钥已经保存”，不会立即改变当前连接。请再打开一次切换菜单：
+配置保存后，如果当前仍是 ChatGPT 账户，扩展会明确提示 **当前连接仍是 ChatGPT 账户**：
 
-1. 点击右下角 `Codex: ChatGPT 账户`。
-2. 点击 **自定义 API**。
-3. 等 VS Code 自动重载。
-4. 重载后查看右下角，确认显示 `Codex: 自定义 API`。
+1. 点击 **立即切换到自定义 API**；也可以稍后从状态栏切换。
+2. 等 VS Code 自动重载。
+3. 重载后，扩展会自动打开一个空白 Codex 对话。
+4. 查看右下角，确认显示 `Codex 新对话: API`，然后在刚打开的新对话中发送消息。
+
+不要回到原来的账户会话测试 API；旧会话的 Provider 不会因为全局开关自动迁移。
 
 ## 六、在输入框下方选择模型和推理等级
 
@@ -165,10 +169,10 @@ API Key 会用当前 Windows 用户的 DPAPI 加密，并与这条完整 HTTPS B
 
 ## 七、切回 ChatGPT 账户
 
-1. 点击 VS Code 右下角的 `Codex: 自定义 API`。
+1. 点击 VS Code 右下角的 `Codex 新对话: API`。
 2. 在菜单中点击 **ChatGPT 账户**。
 3. 等 VS Code 自动重载。
-4. 重载后确认右下角显示 `Codex: ChatGPT 账户`。
+4. 重载后确认右下角显示 `Codex 新对话: 账户`，并使用自动打开的新对话。
 
 切换器不会注销 ChatGPT，也不会删除官方 Codex 的登录信息。以后可以用同一个状态栏入口来回切换。
 
@@ -180,7 +184,15 @@ API Key 会用当前 Windows 用户的 DPAPI 加密，并与这条完整 HTTPS B
 
 ### 已切换，但输入框下方还是官方模型
 
-先看右下角状态栏是否为 `Codex: 自定义 API`。如果是，请运行 `Developer: Reload Window`，然后新建一个 Codex 对话。仍不正常时，重新执行一次 `Codex: 使用自定义 API`。
+先看右下角状态栏是否为 `Codex 新对话: API`。如果是，请运行 `Developer: Reload Window`，然后新建一个 Codex 对话。仍不正常时，重新执行一次 `Codex: 使用自定义 API`。
+
+### 已选 API，却仍提示 ChatGPT 账户额度耗尽
+
+这通常表示你继续打开了一个由 `openai` 账户 Provider 创建的旧会话。状态栏只表示新对话默认连接，不能证明当前旧会话已经迁移。
+
+重新执行 `Codex: 使用自定义 API`，等待窗口重载，然后直接使用扩展自动打开的空白对话。不要从历史列表重新点回原账户会话。2.2.1 会在每次切换后自动执行官方的 **New Chat** 命令，专门避免这种误用。
+
+官方 Codex 在 API 模式下仍可能为登录状态、模型目录或界面信息执行账户侧后台请求，因此日志中偶尔出现账户额度警告不一定代表新对话走错连接；判断实际路由时，应以新对话能否独立完成请求为准。
 
 ### 历史列表仍然只显示当前连接的会话
 
@@ -206,7 +218,7 @@ API Key 会用当前 Windows 用户的 DPAPI 加密，并与这条完整 HTTPS B
 
 OpenAI App Server 的 `thread/list` 接口支持通过 `modelProviders` 过滤本地会话。当前官方 VS Code 扩展在若干历史查询中只取当前 Provider，因此账户和 API 的本地会话会分开显示。本扩展把经过验证的查询改为请求全部 Provider；不移动会话文件，也不读写历史数据库。参见 [OpenAI Codex App Server](https://learn.chatgpt.com/docs/app-server)。
 
-共享的是“历史入口和上下文”，不是两边服务端的数据同步。打开旧会话后，新请求会使用切换器当前选中的连接。
+共享的是“历史入口”，不是两边服务端的数据同步，也不是 Provider 迁移。App Server 返回的每个 thread 都带有 `modelProvider`；恢复旧 thread 会继续该会话，而切换器不会改写其数据库记录。2.2.1 在切换后自动打开新对话，让新 thread 按新配置创建。需要把旧上下文带到另一 Provider 时，请先检查敏感信息，再手动整理必要内容到新对话。
 
 ### Max 推理等级
 
@@ -233,6 +245,7 @@ OpenAI 官方配置参考公开支持用 `model_catalog_json` 加载本地模型
 - API Key 使用 Windows DPAPI 加密，不写入 `config.toml`。
 - 切换器只管理自己的配置区块，并保留 ChatGPT 登录。
 - 共享历史修复不读取或修改 Codex 的会话数据库，只调整官方界面的本地查询参数。
+- 状态栏只声明新对话默认连接；切换后自动打开新对话，不改写旧会话的 Provider。
 - 使用自定义 API 时，Codex 会把提示词、源码上下文、工具数据和 API Key 发送给你选择的服务方；你必须自行确认该服务方可信。
 - 不要关闭 VS Code 的扩展签名校验，也不要从不可信镜像安装 VSIX。
 

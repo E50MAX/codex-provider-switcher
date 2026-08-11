@@ -27,17 +27,22 @@ const {
   THREAD_LIST_MARKER,
   patchSharedHistorySource
 } = require('./lib/history-patch');
-const { setTopLevelValue: setConfigTopLevelValue } = require('./lib/config-text');
+const {
+  removeManagedBlock,
+  setTopLevelValue: setConfigTopLevelValue
+} = require('./lib/config-text');
 
 const PROVIDER_ID = 'lab_relay';
 const MANAGED_BEGIN = '# >>> codex-provider-switcher: lab_relay >>>';
 const MANAGED_END = '# <<< codex-provider-switcher: lab_relay <<<';
 const DEFAULT_PROVIDER_NAME = 'Custom Responses API';
 const CODEX_EXTENSION_ID = 'openai.chatgpt';
+const LEGACY_EXTENSION_ID = 'lab-local.codex-provider-switcher';
 const MAX_PATCH_CONSENT_KEY = 'max-patch-consent-v1';
 const MAX_PATCH_DISMISSED_KEY = 'max-patch-prompt-dismissed-v1';
 const HISTORY_PATCH_CONSENT_KEY = 'shared-history-patch-consent-v1';
 const HISTORY_PATCH_DISMISSED_KEY = 'shared-history-patch-prompt-dismissed-v1';
+const PENDING_FRESH_CHAT_KEY = 'pending-fresh-chat-after-provider-switch-v1';
 const MAX_SETTINGS_BYTES = 1024 * 1024;
 const MAX_MODEL_CACHE_BYTES = 5 * 1024 * 1024;
 const MAX_CODEX_ASSET_BYTES = 50 * 1024 * 1024;
@@ -127,18 +132,6 @@ function setTopLevelValue(text, key, value) {
   return setConfigTopLevelValue(text, key, value, MANAGED_BEGIN);
 }
 
-function escapeRegex(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function removeManagedBlock(text) {
-  const pattern = new RegExp(
-    `(?:\\r?\\n)?${escapeRegex(MANAGED_BEGIN)}[\\s\\S]*?${escapeRegex(MANAGED_END)}(?:\\r?\\n)?`,
-    'g'
-  );
-  return text.replace(pattern, newlineOf(text)).replace(/(?:\r?\n){3,}/g, `${newlineOf(text)}${newlineOf(text)}`);
-}
-
 function providerBlock(context, custom) {
   const extensionPaths = pathsFor(context);
   const headers = normalizeHeaderMap(custom.httpHeaders);
@@ -186,7 +179,7 @@ function providerBlock(context, custom) {
 
 function upsertProviderBlock(text, context, custom) {
   const newline = newlineOf(text);
-  const clean = removeManagedBlock(text).trimEnd();
+  const clean = removeManagedBlock(text, MANAGED_BEGIN, MANAGED_END).trimEnd();
   return `${clean}${newline}${newline}${providerBlock(context, custom).replace(/\n/g, newline)}${newline}`;
 }
 
@@ -558,10 +551,32 @@ async function configureCustomApi(context) {
 
   const nextConfig = upsertProviderBlock(configText, context, custom);
   await backupAndWriteConfig(context, configText, nextConfig);
-  await vscode.window.showInformationMessage(
-    '自定义 API 已安全保存；切换后请在 Codex 输入框下方选择模型和推理等级。'
-  );
   return custom;
+}
+
+async function configureCustomApiAndOfferSwitch(context) {
+  const custom = await configureCustomApi(context);
+  if (!custom) {
+    return;
+  }
+
+  const configText = await readConfig(context);
+  const current = topLevelValue(configText, 'model_provider') || 'openai';
+  if (current === PROVIDER_ID) {
+    await updateStatus(context);
+    await reloadAfterChange('自定义 API 配置已更新');
+    return;
+  }
+
+  const action = await vscode.window.showInformationMessage(
+    '自定义 API 已安全保存；当前连接仍是 ChatGPT 账户。',
+    '立即切换到自定义 API'
+  );
+  if (action === '立即切换到自定义 API') {
+    await useCustomApi(context);
+    return;
+  }
+  await updateStatus(context);
 }
 
 async function useCustomApi(context) {
@@ -603,6 +618,10 @@ async function useCustomApi(context) {
   nextConfig = setTopLevelValue(nextConfig, 'service_tier', undefined);
   nextConfig = setTopLevelValue(nextConfig, 'model_catalog_json', pathsFor(context).catalog);
   await backupAndWriteConfig(context, configText, nextConfig);
+  await context.globalState.update(PENDING_FRESH_CHAT_KEY, {
+    provider: PROVIDER_ID,
+    label: '自定义 API'
+  });
   await updateStatus(context);
   await reloadAfterSwitch('自定义 API');
 }
@@ -621,6 +640,10 @@ async function useAccount(context) {
   nextConfig = setTopLevelValue(nextConfig, 'service_tier', account.serviceTier);
   nextConfig = setTopLevelValue(nextConfig, 'model_catalog_json', account.modelCatalogJson);
   await backupAndWriteConfig(context, configText, nextConfig);
+  await context.globalState.update(PENDING_FRESH_CHAT_KEY, {
+    provider: 'openai',
+    label: 'ChatGPT 账户'
+  });
   await updateStatus(context);
   await reloadAfterSwitch('ChatGPT 账户');
 }
@@ -642,7 +665,49 @@ async function reloadAfterChange(message) {
 }
 
 async function reloadAfterSwitch(label) {
-  await reloadAfterChange(`Codex 已切换到 ${label}`);
+  await reloadAfterChange(`Codex 新对话连接已切换到 ${label}`);
+}
+
+async function openFreshChatAfterProviderSwitch(context) {
+  if (reloadScheduled) {
+    return;
+  }
+
+  const pending = context.globalState.get(PENDING_FRESH_CHAT_KEY);
+  if (!pending || typeof pending !== 'object') {
+    return;
+  }
+
+  const expectedProvider = pending.provider;
+  const expectedLabel = pending.label;
+  if (
+    (expectedProvider !== 'openai' && expectedProvider !== PROVIDER_ID)
+    || typeof expectedLabel !== 'string'
+  ) {
+    await context.globalState.update(PENDING_FRESH_CHAT_KEY, undefined);
+    return;
+  }
+
+  const configText = await readConfig(context);
+  const currentProvider = topLevelValue(configText, 'model_provider') || 'openai';
+  await context.globalState.update(PENDING_FRESH_CHAT_KEY, undefined);
+  if (currentProvider !== expectedProvider) {
+    await vscode.window.showWarningMessage(
+      '连接配置在重载前发生了变化，未自动打开新对话；请重新选择一次连接。'
+    );
+    return;
+  }
+
+  try {
+    await vscode.commands.executeCommand('chatgpt.newChat');
+    await vscode.window.showInformationMessage(
+      `已切换到 ${expectedLabel}，并打开一个使用该连接的新对话。历史列表仍会显示另一种连接的旧会话，但旧会话的 Provider 不会被迁移。`
+    );
+  } catch (error) {
+    await vscode.window.showWarningMessage(
+      `已切换到 ${expectedLabel}，但无法自动打开新对话：${errorMessage(error)}。请在 Codex 中手动点击 New Chat。`
+    );
+  }
 }
 
 async function switchConnection(context) {
@@ -651,17 +716,17 @@ async function switchConnection(context) {
   const selected = await vscode.window.showQuickPick([
     {
       label: '$(account) ChatGPT 账户',
-      description: current === 'openai' ? '当前使用' : '保留现有登录，切回官方账户',
+      description: current === 'openai' ? '新对话当前使用' : '保留现有登录；切换后自动打开新对话',
       target: 'account'
     },
     {
       label: '$(server-process) 自定义 API',
-      description: current === PROVIDER_ID ? '当前使用' : '使用可信的 HTTPS Responses API',
+      description: current === PROVIDER_ID ? '新对话当前使用' : '切换后自动打开使用该 API 的新对话',
       target: 'custom'
     },
     {
-      label: '$(settings-gear) 配置自定义 API',
-      description: '设置 HTTPS Base URL 和加密密钥',
+      label: '$(settings-gear) 配置 / 更新自定义 API',
+      description: '保存地址和密钥后可选择立即切换',
       target: 'configure'
     }
   ], {
@@ -678,8 +743,7 @@ async function switchConnection(context) {
   } else if (selected.target === 'custom') {
     await useCustomApi(context);
   } else {
-    await configureCustomApi(context);
-    await updateStatus(context);
+    await configureCustomApiAndOfferSwitch(context);
   }
 }
 
@@ -927,10 +991,24 @@ async function applyCodexMaxPatch(inspection) {
     throw new Error('Codex webview 在确认后发生变化，已取消修复');
   }
 
-  await atomicWriteFile(inspection.assetPath, currentResult.source);
-  const verification = patchMaxVisibilitySource(await readCodexAsset(inspection.assetPath));
-  if (verification.status !== 'already-patched') {
-    throw new Error('写入后的 Max 修复未通过结构校验');
+  try {
+    await atomicWriteFile(inspection.assetPath, currentResult.source);
+    const verification = patchMaxVisibilitySource(await readCodexAsset(inspection.assetPath));
+    if (verification.status !== 'already-patched') {
+      throw new Error('写入后的 Max 修复未通过结构校验');
+    }
+  } catch (error) {
+    try {
+      const writtenSource = await readCodexAsset(inspection.assetPath);
+      if (writtenSource === currentResult.source) {
+        await atomicWriteFile(inspection.assetPath, currentSource);
+      } else if (writtenSource !== currentSource) {
+        throw new Error('Codex Max 资源在回滚前被其他程序修改，已拒绝覆盖');
+      }
+    } catch (rollbackError) {
+      throw new Error(`${errorMessage(error)}；回滚失败：${errorMessage(rollbackError)}`);
+    }
+    throw error;
   }
   return { status: 'patched' };
 }
@@ -981,7 +1059,7 @@ async function requestSharedHistoryPatchConsent(context, version, replacementCou
     '让 ChatGPT 账户与自定义 API 共享本地历史？',
     {
       modal: true,
-      detail: `Codex ${version} 的历史查询会把不同 Provider 的本地对话分开。\n\n修复会在严格校验后，把官方 Codex 扩展中 ${replacementCount} 个按当前 Provider 查询的参数统一改为空数组；不会读取、复制或修改任何对话记录。官方扩展更新会覆盖该修改，切换器可在再次校验后自动恢复。`
+      detail: `Codex ${version} 的历史查询会把不同 Provider 的本地对话分开。\n\n修复会在严格校验后，把官方 Codex 扩展中 ${replacementCount} 个按当前 Provider 查询的参数统一改为空数组；不会读取、复制或修改任何对话记录，也不会迁移旧会话记录的 Provider。切换连接后请使用自动打开的新对话。\n\n官方扩展更新会覆盖该修改，切换器可在再次校验后自动恢复。`
     },
     '共享历史并重载'
   );
@@ -1200,13 +1278,13 @@ async function updateStatus(context) {
     const reasoningEffort = normalizeReasoningEffort(topLevelValue(configText, 'model_reasoning_effort'));
     const reasoningLabel = reasoningEffort ? `推理等级：${reasoningEffort}。` : '';
     if (current === PROVIDER_ID) {
-      statusBarItem.text = '$(server-process) Codex: 自定义 API';
+      statusBarItem.text = '$(server-process) Codex 新对话: API';
       statusBarItem.tooltip = await secretExists(context)
-        ? `当前使用自定义 HTTPS Responses API。${reasoningLabel}点击切换连接。`
-        : `当前使用自定义 API，但需要重新输入 API Key。${reasoningLabel}`;
+        ? `新对话将使用自定义 HTTPS Responses API。旧会话不会迁移 Provider。${reasoningLabel}点击切换连接。`
+        : `新对话已选择自定义 API，但需要重新输入 API Key。旧会话不会迁移 Provider。${reasoningLabel}`;
     } else {
-      statusBarItem.text = '$(account) Codex: ChatGPT 账户';
-      statusBarItem.tooltip = `当前使用 ChatGPT 账户。${reasoningLabel}点击切换连接。`;
+      statusBarItem.text = '$(account) Codex 新对话: 账户';
+      statusBarItem.tooltip = `新对话将使用 ChatGPT 账户。旧会话不会迁移 Provider。${reasoningLabel}点击切换连接。`;
     }
   } catch (error) {
     statusBarItem.text = '$(warning) Codex: 连接配置错误';
@@ -1236,7 +1314,35 @@ function registerSafeCommand(context, command, handler) {
   }));
 }
 
+async function stopForLegacyExtensionConflict() {
+  const legacyExtension = vscode.extensions.getExtension(LEGACY_EXTENSION_ID);
+  if (!legacyExtension) {
+    return false;
+  }
+
+  const action = await vscode.window.showWarningMessage(
+    '检测到会抢占同名命令的旧版 Codex Provider Switcher。',
+    {
+      modal: true,
+      detail: `请先卸载 ${LEGACY_EXTENSION_ID}，只保留 e50max.codex-provider-switcher，然后运行 Developer: Reload Window。为避免写入冲突，本版本本次不会修改任何配置或 Codex 文件。`
+    },
+    '打开扩展面板'
+  );
+  if (action === '打开扩展面板') {
+    try {
+      await vscode.commands.executeCommand('workbench.view.extensions');
+      await vscode.commands.executeCommand('workbench.extensions.search', `@id:${LEGACY_EXTENSION_ID}`);
+    } catch {
+      await vscode.window.showInformationMessage(`请在扩展面板搜索并卸载：${LEGACY_EXTENSION_ID}`);
+    }
+  }
+  return true;
+}
+
 async function activate(context) {
+  if (await stopForLegacyExtensionConflict()) {
+    return;
+  }
   await ensureDirectories(context);
   let configText = await readConfig(context);
   const settings = await readSettings(context);
@@ -1253,7 +1359,7 @@ async function activate(context) {
   context.subscriptions.push(statusBarItem);
 
   registerSafeCommand(context, 'labCodex.switchConnection', () => switchConnection(context));
-  registerSafeCommand(context, 'labCodex.configureLab', () => configureCustomApi(context));
+  registerSafeCommand(context, 'labCodex.configureLab', () => configureCustomApiAndOfferSwitch(context));
   registerSafeCommand(context, 'labCodex.useAccount', () => useAccount(context));
   registerSafeCommand(context, 'labCodex.useLab', () => useCustomApi(context));
   registerSafeCommand(context, 'labCodex.repairSharedHistory', () => {
@@ -1281,6 +1387,7 @@ async function activate(context) {
     await runAutomaticCompatibilityRepairs(context);
   }
   await updateStatus(context);
+  await openFreshChatAfterProviderSwitch(context);
 }
 
 function deactivate() {
