@@ -131,7 +131,7 @@
   },
   "scripts": {
     "lint": "node --check extension.js && node --check lib/validation.js && node --check lib/config-text.js && node --check lib/model-catalog.js && node --check lib/max-patch.js && node --check lib/history-patch.js && node --check tools/audit-source.mjs && node --check tools/publish-marketplace.mjs",
-    "test": "node --test",
+    "test": "node --test --test-concurrency=1",
     "audit": "node tools/audit-source.mjs",
     "verify": "npm run lint && npm test && npm run audit",
     "vscode:prepublish": "npm run verify",
