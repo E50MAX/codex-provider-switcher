@@ -52,6 +52,7 @@ const runtimeFiles = [
   path.join('lib', 'model-catalog.js'),
   path.join('lib', 'max-patch.js'),
   path.join('lib', 'history-patch.js'),
+  path.join('lib', 'provider-takeover-patch.js'),
   path.join('lib', 'transactional-write.js'),
   path.join('scripts', 'get-secret.ps1'),
   path.join('scripts', 'save-secret.ps1')
@@ -99,6 +100,54 @@ for (const pattern of requiredHistoryPatchSafeguards) {
   }
 }
 
+const requiredProviderTakeoverSafeguards = [
+  /PROVIDER_TAKEOVER_CONSENT_KEY/,
+  /candidates\.length !== 1/,
+  /PROVIDER_TAKEOVER_UI_ASSET_NAME/,
+  /PROVIDER_TAKEOVER_CONVERSATION_ASSET_NAME/,
+  /localTaskRow\.resumeLiveWriterError/,
+  /localConversation\.writerConflict\.retry/,
+  /This is open in another app/,
+  /verifyProviderTakeoverComposerGateSource/,
+  /isWriterConflict:/,
+  /patchProviderTakeoverSource/,
+  /replaceVerified/,
+  /codexProviderSwitcherExpectedProvider/,
+  /config\/read/,
+  /codexProviderSwitcherEffectiveConfig\.model_provider/,
+  /codexProviderSwitcherResumeParams\.modelProvider=/,
+  /codexProviderSwitcherEffectiveConfig\.model/,
+  /codexProviderSwitcherResumeParams\.model=/,
+  /model\/list/,
+  /current model catalog is incomplete; sending is blocked/,
+  /codexProviderSwitcherEffectiveConfig\.model_reasoning_effort/,
+  /model_reasoning_effort:codexProviderSwitcherExpectedEffort/,
+  /account\/read/,
+  /refreshToken:false/,
+  /no ChatGPT account is signed in; sending is blocked/,
+  /current provider config could not be read; sending is blocked/,
+  /selected provider is invalid; sending is blocked/,
+  /WRITER_CONFLICT_RETRY_LIMIT/,
+  /codexProviderSwitcherResumeAttempt/,
+  /includes\('already has an active writer'\)/,
+  /thread\/unsubscribe/,
+  /codexProviderSwitcherUnsubscribeResult\.status/,
+  /unsubscribed/,
+  /active thread provider mismatch; sending is blocked/,
+  /provider mismatch requires a window reload; sending is blocked/,
+  /runtime selection mismatch requires a window reload; sending is blocked/,
+  /upgradeIntermediateProviderTakeoverSource/,
+  /upgradePreviousProviderTakeoverSource/,
+  /upgradeOlderProviderTakeoverSource/,
+  /upgradeLegacyProviderTakeoverSource/,
+  /Provider 接管资源在回滚前被其他程序修改/
+];
+for (const pattern of requiredProviderTakeoverSafeguards) {
+  if (!pattern.test(runtimeText)) {
+    findings.push(`Provider takeover repair is missing safeguard: ${pattern}`);
+  }
+}
+
 const requiredCredentialSafeguards = [
   /Managed provider is not the active model provider/,
   /Managed provider markers are missing or ambiguous/,
@@ -120,15 +169,19 @@ if (!/LEGACY_EXTENSION_ID/.test(extensionText) || !/stopForLegacyExtensionConfli
 }
 
 const requiredRoutingSafeguards = [
-  /PENDING_FRESH_CHAT_KEY/,
-  /executeCommand\('chatgpt\.newChat'\)/,
-  /Codex 新对话: API/,
-  /旧会话不会迁移 Provider/
+  /PENDING_PROVIDER_SWITCH_KEY/,
+  /prepareProviderSwitch/,
+  /completeProviderSwitchAfterReload/,
+  /providerTakeoverState !== 'ready'/,
+  /workbench\.action\.reloadWindow/
 ];
 for (const pattern of requiredRoutingSafeguards) {
   if (!pattern.test(extensionText)) {
-    findings.push(`Provider routing is missing a fresh-chat safeguard: ${pattern}`);
+    findings.push(`Provider routing is missing a takeover safeguard: ${pattern}`);
   }
+}
+if (/executeCommand\('chatgpt\.newChat'\)/.test(extensionText)) {
+  findings.push('Provider switching must not discard the current thread by forcing a new chat');
 }
 
 const runtimeUrls = runtimeText.match(/https:\/\/[^\s'"`]+/g) || [];
@@ -146,6 +199,7 @@ const contributedCommands = new Set(
 );
 const requiredCommands = [
   'labCodex.repairSharedHistory',
+  'labCodex.repairProviderTakeover',
   'labCodex.repairMaxOption'
 ];
 for (const command of requiredCommands) {
@@ -158,7 +212,11 @@ for (const command of requiredCommands) {
 }
 
 const configurationProperties = manifest.contributes?.configuration?.properties || {};
-for (const setting of ['labCodex.autoPatchSharedHistory', 'labCodex.autoPatchMax']) {
+for (const setting of [
+  'labCodex.autoPatchProviderTakeover',
+  'labCodex.autoPatchSharedHistory',
+  'labCodex.autoPatchMax'
+]) {
   if (configurationProperties[setting]?.type !== 'boolean') {
     findings.push(`package.json is missing boolean repair setting: ${setting}`);
   }

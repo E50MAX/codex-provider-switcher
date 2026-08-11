@@ -47,6 +47,7 @@ function createVscodeMock(fixture) {
   const warnings = [];
   const information = [];
   const settings = {
+    autoPatchProviderTakeover: false,
     autoPatchSharedHistory: true,
     autoReloadAfterSharedHistoryPatch: false,
     autoPatchMax: false

@@ -1,8 +1,8 @@
 {
   "name": "codex-provider-switcher",
   "displayName": "Secure Codex Provider Switcher (Unofficial)",
-  "description": "安全切换新 Codex 对话的 ChatGPT 账户与自定义 HTTPS Responses API，合并显示本地历史列表。",
-  "version": "2.2.2",
+  "description": "安全切换 Codex 新旧会话的 ChatGPT 账户与自定义 HTTPS Responses API，并共享本地历史。",
+  "version": "2.3.4",
   "publisher": "e50max",
   "author": {
     "name": "E50MAX"
@@ -57,6 +57,7 @@
     "onCommand:labCodex.useAccount",
     "onCommand:labCodex.useLab",
     "onCommand:labCodex.repairSharedHistory",
+    "onCommand:labCodex.repairProviderTakeover",
     "onCommand:labCodex.repairMaxOption",
     "onCommand:labCodex.deleteLabKey"
   ],
@@ -88,6 +89,11 @@
         "icon": "$(history)"
       },
       {
+        "command": "labCodex.repairProviderTakeover",
+        "title": "Codex: 修复旧会话 Provider 接管",
+        "icon": "$(debug-disconnect)"
+      },
+      {
         "command": "labCodex.repairMaxOption",
         "title": "Codex: 修复对话框中的 Max 推理等级",
         "icon": "$(tools)"
@@ -104,7 +110,17 @@
         "labCodex.autoReload": {
           "type": "boolean",
           "default": true,
-          "description": "切换 provider 后自动重载 VS Code 窗口，并打开一个使用新连接的空白 Codex 对话。"
+          "description": "切换 Provider 时自动重载 VS Code 窗口；关闭后，每次切换都必须手动确认“切换并重载”。"
+        },
+        "labCodex.autoPatchProviderTakeover": {
+          "type": "boolean",
+          "default": true,
+          "description": "获得一次明确同意后，在官方 Codex 更新时重新校验并恢复旧会话 Provider 接管与发送前校验。"
+        },
+        "labCodex.autoReloadAfterProviderTakeoverPatch": {
+          "type": "boolean",
+          "default": true,
+          "description": "成功恢复旧会话 Provider 接管保护后自动重载一次 VS Code 窗口。"
         },
         "labCodex.autoPatchSharedHistory": {
           "type": "boolean",
@@ -130,7 +146,7 @@
     }
   },
   "scripts": {
-    "lint": "node --check extension.js && node --check lib/validation.js && node --check lib/config-text.js && node --check lib/model-catalog.js && node --check lib/max-patch.js && node --check lib/history-patch.js && node --check lib/transactional-write.js && node --check tools/audit-source.mjs && node --check tools/publish-marketplace.mjs",
+    "lint": "node --check extension.js && node --check lib/validation.js && node --check lib/config-text.js && node --check lib/model-catalog.js && node --check lib/max-patch.js && node --check lib/history-patch.js && node --check lib/provider-takeover-patch.js && node --check lib/transactional-write.js && node --check tools/audit-source.mjs && node --check tools/publish-marketplace.mjs",
     "test": "node --test --test-concurrency=1",
     "audit": "node tools/audit-source.mjs",
     "verify": "npm run lint && npm test && npm run audit",

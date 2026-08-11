@@ -14,14 +14,17 @@ It provides the following controls:
 - no telemetry, analytics, remote code loading, or custom updater;
 - a strict VSIX file allowlist;
 - explicit one-time consent before repairing the official Codex provider filter used by local history;
+- explicit one-time consent before repairing old-thread provider takeover;
 - explicit one-time consent before repairing the official Codex model picker's Max filter;
-- path, file-type, size, marker-count, replacement-count, and post-write checks around both repairs;
+- path, file-type, size, marker-count, replacement-count, and post-write checks around all repairs;
 - transactional writes and best-effort rollback when the shared-history repair spans two official Codex resources.
 - refusal to activate alongside the legacy extension id that can claim the same commands;
 - rejection of plaintext credential-bearing static headers and ambiguous JavaScript object-property names;
 - strict managed-block boundaries and an active-provider check before the DPAPI secret can be decrypted;
 - reparse-point checks and atomic replacement for the encrypted secret;
-- a fresh official Codex chat after each provider switch, so an already loaded thread is not mistaken for the new route.
+- a required window reload after each provider switch;
+- effective-config, complete current-model-catalog, ChatGPT-login, same-thread identity, and runtime-selection checks before a resumed old conversation is accepted;
+- bounded retries for transient writer-lock handoff, plus fail-closed handling for persistent locks, active threads, failed unsubscribe operations, and Provider-verification failures.
 
 ## Important limitations
 
@@ -29,11 +32,15 @@ The extension configures Codex, but Codex owns the actual network connection. Th
 
 To display ChatGPT-account and custom-API conversations in one local history list, the extension can modify the installed official Codex extension's bundled host program and one minified webview asset. The repair only changes validated provider-filtering `modelProviders` history-query parameters to empty arrays. It does not read, copy, migrate, or write Codex conversation records or its history database. This is a local visibility repair, not cloud synchronization.
 
-Codex stores a `modelProvider` on each conversation. Shared-history repair only makes those conversations visible together; it does not rewrite that field. An old or already loaded conversation can therefore continue using its original provider even when the switcher's status bar names a different default for new conversations. After every switch, the extension reloads the window and opens a fresh official Codex chat. Use that new chat when provider routing or quota isolation matters. The status bar must not be treated as proof of an old thread's route.
+Codex stores a `modelProvider` on each conversation. Shared-history repair only makes those conversations visible together and does not rewrite that database field. With separate consent, the provider-takeover repair first resolves the current working directory's effective configuration through the local App Server's read-only `config/read`, validates model capabilities with `model/list`, and in account mode confirms a ChatGPT login with `account/read` and `refreshToken: false`. It retains a thread-specific model, reasoning effort, or service tier only when the current catalog supports it, then explicitly passes the compatible selection to `thread/resume`. It retries a genuine transient writer conflict for a bounded 10-second window, then validates the thread identity and complete returned runtime selection.
 
-The extension deliberately does not edit Codex's conversation database or rollout files to force a migration. Carrying old context into a different provider must be an explicit user action, because it can disclose messages, source code, and tool output to a service with a different trust boundary.
+`thread/unsubscribe` removes the current connection's subscription but does not immediately unload the thread; App Server retains an unsubscribed thread during its inactivity grace period. The extension therefore never treats unsubscribe followed by an immediate resume as a takeover. If a successfully resumed idle thread reports another Provider, model, reasoning effort, or service tier, the repair unsubscribes this connection and fails closed so a clean window reload can create a new runtime. Active threads are not forcibly released. A persistent lock, unexpected thread identity, active runtime mismatch, failed unsubscribe, incomplete model catalog, missing ChatGPT login, or any unverified selection is treated as an active-writer conflict so the official UI blocks the composer. The UI may therefore use its generic “open in another app” wording for this safety gate.
 
-To expose a model-catalog entry's `max` reasoning level in the current Codex VS Code UI, the extension can modify one minified webview asset inside the installed official Codex extension. This is opt-in. The repair proceeds only when one known structural pattern matches exactly once, and it is refused after any unrecognized upstream change. An official Codex update replaces the modified asset; if automatic repair remains enabled, the extension checks the new version again before writing. VS Code or endpoint-security software may still report a modified extension installation. Reinstalling or updating the official Codex extension restores its original files.
+The switch and takeover checks do not themselves send a model request. Sending the next message in an old conversation can disclose its retained messages, source code, image references, and tool output to the newly selected Provider or newly signed-in account. Users must treat the switch as an explicit change of trust boundary. Local history is scoped to the Windows user and `CODEX_HOME`, not the ChatGPT identity, so another account using the same local profile can read that shared history.
+
+The repair does not rewrite image or context-compaction history items. Embedded image data remains part of the local rollout, while a `localImage` reference is only usable while its source file remains accessible. After compaction, the next model turn receives Codex's retained summary and active context rather than every original pre-compaction token or image. The generated custom catalog preserves upstream context-window metadata, but the extension cannot prove that a third-party Provider actually honors the advertised limit or input format.
+
+The provider-takeover and Max repairs each modify a strictly validated minified webview resource inside the installed official Codex extension. Shared history modifies the validated extension-host bundle and one webview resource. Every repair is opt-in and is refused after an unrecognized upstream change. An official Codex update replaces modified assets; if automatic repair remains enabled, the extension checks the new version again before writing. VS Code or endpoint-security software may still report a modified extension installation. Reinstalling or updating the official Codex extension restores its original files.
 
 It cannot protect against:
 

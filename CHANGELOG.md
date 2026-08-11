@@ -1,5 +1,42 @@
 # Changelog
 
+## 2.3.4
+
+- Verifies the current ChatGPT login with non-refreshing `account/read` before resuming account-mode history, so logout or a failed relogin cannot silently fall through to an unusable thread.
+- Validates the resumed model, reasoning effort, and service tier against the current `model/list`; compatible thread-specific choices are retained, while choices unavailable after an account or Provider change fall back to compatible current settings or the model default.
+- Revalidates saved account settings against the official model cache and removes stale selections when another ChatGPT account has different model entitlements.
+- Keeps a previously validated custom Sol/Terra/Luna catalog usable when a newly logged-in account's cache no longer exposes those templates, without duplicating the custom display prefix.
+- Preserves model context-window metadata and leaves image, local-image, image-view, and context-compaction history payloads untouched; added regression and isolated App Server coverage for restored images and post-compaction continuation.
+- Automatically upgrades structurally verified 2.3.0–2.3.3 Provider-takeover patches and continues to fail closed on incomplete catalogs or runtime selection mismatches.
+
+## 2.3.3
+
+- Fixed old conversations continuing to use the Provider stored in their history metadata after the user switched connections.
+- Reads the effective App Server configuration with `config/read` immediately before `thread/resume`, then explicitly resumes and verifies the thread with that configuration's `model_provider`.
+- Fails closed if the effective Provider cannot be read or verified, and automatically upgrades structurally verified 2.3.0–2.3.2 takeover patches.
+
+## 2.3.2
+
+- Fixed account-mode history falsely reporting “task is running elsewhere” when the official client omits the default `openai` Provider from resume parameters.
+- Normalizes only a missing Provider to `openai`, writes the resolved value into `thread/resume`, and still verifies the Provider returned by App Server before enabling the composer.
+- Automatically upgrades structurally verified 2.3.1 and 2.3.0 takeover patches, with regression coverage for the omitted account Provider and malformed Provider values.
+
+## 2.3.1
+
+- Fixed false “task is running elsewhere” failures while the old App Server process hands its thread writer lock to the reloaded window.
+- Added a bounded 10-second retry for genuine transient writer conflicts without interrupting an active task or stealing another window's lock.
+- Stopped treating `thread/unsubscribe` as an immediate unload: App Server keeps an unsubscribed thread loaded during its inactivity grace period, so a Provider mismatch now fails closed and requires a clean window reload instead of retrying inside the stale runtime.
+- Automatically upgrades the structurally verified 2.3.0 takeover patch and adds regression coverage for transient, persistent, unrelated, and Provider-mismatch failures.
+
+## 2.3.0
+
+- Added opt-in Provider takeover for existing conversations while preserving the original thread ID and local history.
+- On resume, verifies the actual App Server Provider; an idle stale runtime is unsubscribed and resumed with the selected Provider, then verified again.
+- Blocks sending when a thread is active, its identity changes, unsubscribe fails, or the selected Provider cannot be proven.
+- Replaced forced blank-chat creation with a required window reload, allowing new and reopened idle conversations to use the current connection.
+- Added honest `Codex 当前` / `Codex 默认` status states and an explicit warning that continuing an old conversation can disclose retained context to the new Provider.
+- Added structural, integration, routing, update-repair, tamper, privacy, and fail-closed regression coverage.
+
 ## 2.2.2
 
 - Replaced Node-version-dependent filesystem fault mocks with a production transactional-write helper and deterministic in-memory rollback tests.

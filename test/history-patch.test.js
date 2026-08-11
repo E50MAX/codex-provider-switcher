@@ -35,6 +35,18 @@ test('normalizes a partially repaired conditional query to all providers', () =>
   assert.equal(result.source, 'thread/list;modelProviders:[]');
 });
 
+test('does not alter image or compaction payload handling beside the provider filter', () => {
+  const payloadLogic = 'const itemTypes=["image","localImage","imageView","contextCompaction"];';
+  const source = `${payloadLogic}thread/list;modelProviders:null;render(itemTypes)`;
+  const result = patchSharedHistorySource(source);
+
+  assert.equal(result.status, 'patched');
+  assert.equal(
+    result.source,
+    `${payloadLogic}thread/list;modelProviders:[];render(itemTypes)`
+  );
+});
+
 test('refuses unknown history query structures', () => {
   assert.equal(patchSharedHistorySource('modelProviders:null').status, 'unsupported');
   assert.equal(patchSharedHistorySource('thread/list;modelProviders:activeProviders').status, 'unsupported');
