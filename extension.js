@@ -64,6 +64,7 @@ const LEGACY_PENDING_FRESH_CHAT_KEY = 'pending-fresh-chat-after-provider-switch-
 const MAX_SETTINGS_BYTES = 1024 * 1024;
 const MAX_MODEL_CACHE_BYTES = 5 * 1024 * 1024;
 const MAX_CODEX_ASSET_BYTES = 50 * 1024 * 1024;
+const MAX_HISTORY_ASSETS = 8;
 const MAX_POWERSHELL_OUTPUT_BYTES = 64 * 1024;
 const POWERSHELL_TIMEOUT_MS = 15000;
 
@@ -914,24 +915,27 @@ async function inspectCodexSharedHistoryPatch() {
     }
   }
 
-  if (historyAssets.length !== 1) {
+  if (historyAssets.length === 0 || historyAssets.length > MAX_HISTORY_ASSETS) {
     return {
       status: 'unsupported',
       version,
-      reason: `预期找到 1 个历史查询资源，实际找到 ${historyAssets.length} 个`
+      reason: `历史查询资源数量异常：${historyAssets.length}`
     };
   }
-  if (historyAssets[0].result.status === 'unsupported') {
+  const unsupportedHistoryAsset = historyAssets.find(
+    (historyAsset) => historyAsset.result.status === 'unsupported'
+  );
+  if (unsupportedHistoryAsset) {
     return {
       status: 'unsupported',
       version,
-      reason: `历史查询资源：${historyAssets[0].result.reason}`
+      reason: `历史查询资源 ${path.basename(unsupportedHistoryAsset.assetPath)}：${unsupportedHistoryAsset.result.reason}`
     };
   }
 
   const inspectedTargets = [
     { assetPath: hostPath, source: hostSource, result: hostResult },
-    historyAssets[0]
+    ...historyAssets
   ];
   const targets = inspectedTargets
     .filter((target) => target.result.status === 'patched')

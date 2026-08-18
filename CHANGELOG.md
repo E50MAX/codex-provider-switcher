@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.3.5
+
+- Supports the standalone `await` assignment emitted by newer Codex webview bundles when applying and verifying Provider takeover.
+- Repairs every structurally verified split `app-initial-*` history resource, so newer Codex bundles continue to share account and custom-API history.
+
 ## 2.3.4
 
 - Verifies the current ChatGPT login with non-refreshing `account/read` before resuming account-mode history, so logout or a failed relogin cannot silently fall through to an unusable thread.

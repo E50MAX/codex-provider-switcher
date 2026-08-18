@@ -10,6 +10,7 @@ const Module = require('node:module');
 const extensionModulePath = require.resolve('../extension');
 const ORIGINAL_HOST_SOURCE = 'thread/list;modelProviders:e?[PR]:null;modelProviders:[]';
 const ORIGINAL_WEBVIEW_SOURCE = 'thread/list;modelProviders:null;modelProviders:null';
+const SPLIT_WEBVIEW_SOURCE = 'thread/list;modelProviders:null;checkArchivedThreads()';
 
 async function createFixture() {
   const temporaryRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'codex-history-integration-'));
@@ -18,11 +19,20 @@ async function createFixture() {
   const hostPath = path.join(officialRoot, 'out', 'extension.js');
   const assetsPath = path.join(officialRoot, 'webview', 'assets');
   const webviewPath = path.join(assetsPath, 'app-initial-fixture.js');
+  const splitWebviewPath = path.join(assetsPath, 'app-initial-split-fixture.js');
   await fs.promises.mkdir(path.dirname(hostPath), { recursive: true });
   await fs.promises.mkdir(assetsPath, { recursive: true });
   await fs.promises.writeFile(hostPath, ORIGINAL_HOST_SOURCE, 'utf8');
   await fs.promises.writeFile(webviewPath, ORIGINAL_WEBVIEW_SOURCE, 'utf8');
-  return { temporaryRoot, codexHome, officialRoot, hostPath, webviewPath };
+  await fs.promises.writeFile(splitWebviewPath, SPLIT_WEBVIEW_SOURCE, 'utf8');
+  return {
+    temporaryRoot,
+    codexHome,
+    officialRoot,
+    hostPath,
+    webviewPath,
+    splitWebviewPath
+  };
 }
 
 function createGlobalState() {
@@ -152,13 +162,15 @@ async function withActivatedFixture(run) {
 }
 
 test('shared-history activation repair', async (t) => {
-  await t.test('patches both validated Codex resources after consent', async () => {
+  await t.test('patches the host and every split history resource after consent', async () => {
     await withActivatedFixture(async ({ fixture, vscode, globalState }) => {
       const hostSource = await fs.promises.readFile(fixture.hostPath, 'utf8');
       const webviewSource = await fs.promises.readFile(fixture.webviewPath, 'utf8');
+      const splitWebviewSource = await fs.promises.readFile(fixture.splitWebviewPath, 'utf8');
 
       assert.equal(hostSource, 'thread/list;modelProviders:[];modelProviders:[]');
       assert.equal(webviewSource, 'thread/list;modelProviders:[];modelProviders:[]');
+      assert.equal(splitWebviewSource, 'thread/list;modelProviders:[];checkArchivedThreads()');
       assert.equal(globalState.get('shared-history-patch-consent-v1'), true);
       assert.ok(vscode.commands.has('labCodex.repairSharedHistory'));
       assert.equal(vscode.warnings.length, 1);

@@ -28,6 +28,11 @@ const ORIGINAL_SOURCE = [
   'return resumeFixture;'
 ].join('');
 
+const SEMICOLON_AWAIT_SOURCE = ORIGINAL_SOURCE.replace(
+  'let ne=()=>null,re=await te,ie=null;',
+  'let ne=()=>null;re=await te;let ie=null;'
+);
+
 function compilePatchedFixture() {
   const result = patchProviderTakeoverSource(ORIGINAL_SOURCE);
   assert.equal(result.status, 'patched');
@@ -440,6 +445,16 @@ test('provider takeover patch', async (t) => {
       config: { model_reasoning_effort: 'low' },
       serviceTier: 'priority'
     });
+  });
+
+  await t.test('supports a standalone await assignment used by newer Codex bundles', () => {
+    const result = patchProviderTakeoverSource(SEMICOLON_AWAIT_SOURCE);
+
+    assert.equal(result.status, 'patched');
+    assert.equal(result.replacementCount, 3);
+    assert.equal(result.source.includes('re=await te();'), true);
+    assert.equal(verifyPatchedProviderTakeoverSource(result.source), true);
+    assert.equal(patchProviderTakeoverSource(result.source).status, 'already-patched');
   });
 
   await t.test('falls back from stale thread selections to compatible current settings', async () => {

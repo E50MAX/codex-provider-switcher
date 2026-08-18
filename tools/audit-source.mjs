@@ -88,7 +88,9 @@ for (const pattern of requiredMaxPatchSafeguards) {
 
 const requiredHistoryPatchSafeguards = [
   /HISTORY_PATCH_CONSENT_KEY/,
-  /historyAssets\.length !== 1/,
+  /historyAssets\.length === 0/,
+  /historyAssets\.length > MAX_HISTORY_ASSETS/,
+  /historyAssets\.find/,
   /resolveCodexFile/,
   /writeVerifiedBatch/,
   /patchSharedHistorySource/,
