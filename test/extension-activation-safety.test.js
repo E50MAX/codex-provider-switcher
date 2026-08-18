@@ -93,17 +93,26 @@ async function loadExtensionWithMock(codexHome, vscodeApi, run) {
   }
 }
 
-function baseVscodeMock({ getExtension, settings = {}, warningHandler, informationHandler, inputHandler }) {
+function baseVscodeMock({
+  getExtension,
+  settings = {},
+  warningHandler,
+  informationHandler,
+  inputHandler,
+  quickPickHandler
+}) {
   const commands = new Map();
   const warnings = [];
   const information = [];
   const executedCommands = [];
+  const quickPicks = [];
   const statusBar = { text: '', tooltip: '', show() {}, dispose() {} };
   return {
     commands,
     warnings,
     information,
     executedCommands,
+    quickPicks,
     statusBar,
     api: {
       StatusBarAlignment: { Right: 1 },
@@ -148,7 +157,10 @@ function baseVscodeMock({ getExtension, settings = {}, warningHandler, informati
         async showInputBox(options) {
           return inputHandler?.(options);
         },
-        async showQuickPick() {}
+        async showQuickPick(items, options) {
+          quickPicks.push({ items, options });
+          return quickPickHandler?.(items, options);
+        }
       }
     }
   };
@@ -176,6 +188,47 @@ test('activation safety and switching regressions', async (t) => {
       assert.equal(vscode.commands.size, 0);
       assert.equal(fs.existsSync(codexHome), false);
       assert.ok(vscode.warnings.some((message) => message.includes('旧版')));
+    } finally {
+      await fs.promises.rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  await t.test('preselects the provider saved in the active Codex config', async () => {
+    const temporaryRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'codex-saved-provider-'));
+    const codexHome = path.join(temporaryRoot, 'codex-home');
+    const officialRoot = await createPatchedOfficialCodex(temporaryRoot);
+    await fs.promises.mkdir(codexHome, { recursive: true });
+    await fs.promises.writeFile(
+      path.join(codexHome, 'config.toml'),
+      'model_provider = "lab_relay"\nmodel_reasoning_effort = "high"\n',
+      'utf8'
+    );
+    const vscode = baseVscodeMock({
+      getExtension(id) {
+        return id === 'openai.chatgpt'
+          ? { extensionPath: officialRoot, packageJSON: { version: 'fixture' } }
+          : undefined;
+      },
+      settings: {
+        autoPatchProviderTakeover: false,
+        autoPatchSharedHistory: false,
+        autoPatchMax: false
+      }
+    });
+    const context = {
+      extensionPath: path.resolve(__dirname, '..'),
+      globalState: createGlobalState(),
+      subscriptions: []
+    };
+
+    try {
+      await loadExtensionWithMock(codexHome, vscode.api, async (extension) => {
+        await extension.activate(context);
+        await vscode.commands.get('labCodex.switchConnection')();
+      });
+      const [{ items }] = vscode.quickPicks;
+      assert.equal(items.find((item) => item.target === 'account').picked, false);
+      assert.equal(items.find((item) => item.target === 'custom').picked, true);
     } finally {
       await fs.promises.rm(temporaryRoot, { recursive: true, force: true });
     }

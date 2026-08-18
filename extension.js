@@ -13,7 +13,6 @@ const {
   normalizeReasoningEffort
 } = require('./lib/validation');
 const {
-  DEFAULT_REASONING_EFFORT,
   buildCustomModelCatalog,
   resolveAccountSelection,
   resolveCustomSelection
@@ -378,7 +377,7 @@ function normalizeStoredCustom(rawCustom) {
     baseUrl,
     model,
     reviewModel: normalizeModelId(rawCustom.reviewModel || model),
-    modelReasoningEffort: normalizeReasoningEffort(rawCustom.modelReasoningEffort) || DEFAULT_REASONING_EFFORT,
+    modelReasoningEffort: normalizeReasoningEffort(rawCustom.modelReasoningEffort),
     httpHeaders: normalizeHeaderMap(rawCustom.httpHeaders)
   };
 }
@@ -400,7 +399,6 @@ function customSnapshot(configText, existing) {
     reviewModel: topLevelValue(configText, 'review_model') || existing?.reviewModel,
     modelReasoningEffort: topLevelValue(configText, 'model_reasoning_effort')
       || existing?.modelReasoningEffort
-      || DEFAULT_REASONING_EFFORT
   };
 }
 
@@ -801,11 +799,13 @@ async function switchConnection(context) {
     {
       label: '$(account) ChatGPT 账户',
       description: current === 'openai' ? '当前连接' : '切换新对话和空闲旧会话',
+      picked: current === 'openai',
       target: 'account'
     },
     {
       label: '$(server-process) 自定义 API',
       description: current === PROVIDER_ID ? '当前连接' : '切换新对话和空闲旧会话',
+      picked: current === PROVIDER_ID,
       target: 'custom'
     },
     {

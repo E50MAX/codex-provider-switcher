@@ -67,17 +67,32 @@ test('keeps the selected model and effort when supported', () => {
   });
 });
 
-test('defaults to Sol and Max without asking for model text', () => {
+test('uses the selected model default instead of forcing Max', () => {
   const catalog = buildCustomModelCatalog({
     models: [
       model('gpt-5.6-terra', ['low', 'high', 'max']),
-      model('gpt-5.6-sol', ['low', 'medium', 'max', 'ultra'])
+      {
+        ...model('gpt-5.6-sol', ['low', 'medium', 'max', 'ultra']),
+        default_reasoning_level: 'medium'
+      }
     ]
   });
   assert.deepEqual(resolveCustomSelection(catalog), {
     model: 'gpt-5.6-sol',
     reviewModel: 'gpt-5.6-sol',
-    modelReasoningEffort: 'max'
+    modelReasoningEffort: 'medium'
+  });
+});
+
+test('leaves reasoning unset when neither a saved nor model default effort exists', () => {
+  const catalog = buildCustomModelCatalog({
+    models: [model('gpt-5.6-sol', ['low', 'medium', 'max'])]
+  });
+
+  assert.deepEqual(resolveCustomSelection(catalog), {
+    model: 'gpt-5.6-sol',
+    reviewModel: 'gpt-5.6-sol',
+    modelReasoningEffort: undefined
   });
 });
 

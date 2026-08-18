@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.3.6
+
+- Preselects the Provider persisted in the active Codex configuration instead of implying a connection default in the switcher.
+- Preserves the last supported custom-API reasoning effort and otherwise uses the model's own default instead of forcing `max`.
+
 ## 2.3.5
 
 - Supports the standalone `await` assignment emitted by newer Codex webview bundles when applying and verifying Provider takeover.

@@ -172,7 +172,7 @@ API Key 会用当前 Windows 用户的 DPAPI 加密，并与这条完整 HTTPS B
 
 ![在 Codex 输入框下选择推理等级](https://raw.githubusercontent.com/E50MAX/codex-provider-switcher/main/docs/images/reasoning-picker.png)
 
-`Max` 是默认值。更高等级通常响应更慢、消耗更多 token；中转站或具体模型不支持某一等级时，请换低一档。
+扩展不会再强制把 `Max` 设为默认值。重新打开或切换连接时会优先保留退出前保存且当前模型仍支持的推理等级；没有可恢复值时使用模型自身默认值。更高等级通常响应更慢、消耗更多 token；中转站或具体模型不支持某一等级时，请换低一档。
 
 ### 选择模型
 
