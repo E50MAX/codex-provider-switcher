@@ -42,6 +42,7 @@ $entropyBytes = $null
 $encryptedBytes = $null
 $sha256 = $null
 $temporaryPath = "$SecretPath.$PID.$([System.Guid]::NewGuid().ToString('N')).tmp"
+$backupPath = "$SecretPath.$PID.$([System.Guid]::NewGuid().ToString('N')).bak"
 
 try {
     $plainBytes = [System.Text.Encoding]::UTF8.GetBytes($apiKey)
@@ -56,7 +57,7 @@ try {
 
     [System.IO.File]::WriteAllBytes($temporaryPath, $encryptedBytes)
     if ([System.IO.File]::Exists($SecretPath)) {
-        [System.IO.File]::Replace($temporaryPath, $SecretPath, $null, $true)
+        [System.IO.File]::Replace($temporaryPath, $SecretPath, $backupPath, $true)
     }
     else {
         [System.IO.File]::Move($temporaryPath, $SecretPath)
@@ -65,6 +66,9 @@ try {
 finally {
     if ([System.IO.File]::Exists($temporaryPath)) {
         [System.IO.File]::Delete($temporaryPath)
+    }
+    if ([System.IO.File]::Exists($backupPath)) {
+        [System.IO.File]::Delete($backupPath)
     }
     if ($plainBytes) {
         [Array]::Clear($plainBytes, 0, $plainBytes.Length)

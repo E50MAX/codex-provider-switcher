@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.3.7
+
+- Fixed custom API reconfiguration on Windows when an encrypted API key already exists. Secret rotation now uses a valid temporary backup path for atomic replacement and removes the backup afterward.
+- Added regression coverage for replacing and decrypting an existing DPAPI-bound API key without leaving temporary files behind.
+
 ## 2.3.6
 
 - Preselects the Provider persisted in the active Codex configuration instead of implying a connection default in the switcher.
