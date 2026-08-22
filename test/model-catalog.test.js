@@ -67,6 +67,49 @@ test('keeps the selected model and effort when supported', () => {
   });
 });
 
+test('prefers the most recently used effort over a stale provider-specific effort', () => {
+  const catalog = buildCustomModelCatalog({
+    models: [model('gpt-5.6-sol', ['low', 'high', 'xhigh'])]
+  });
+
+  assert.deepEqual(resolveCustomSelection(catalog, {
+    model: 'gpt-5.6-sol',
+    modelReasoningEffort: 'high',
+    preferredReasoningEffort: 'xhigh'
+  }), {
+    model: 'gpt-5.6-sol',
+    reviewModel: 'gpt-5.6-sol',
+    modelReasoningEffort: 'xhigh'
+  });
+});
+
+test('falls back to the provider-specific effort when the recent effort is unsupported', () => {
+  const catalog = buildCustomModelCatalog({
+    models: [model('gpt-5.6-sol', ['low', 'high'])]
+  });
+
+  assert.equal(resolveCustomSelection(catalog, {
+    model: 'gpt-5.6-sol',
+    modelReasoningEffort: 'high',
+    preferredReasoningEffort: 'ultra'
+  }).modelReasoningEffort, 'high');
+});
+
+test('does not report an account entitlement change when only the recent effort wins', () => {
+  const cache = {
+    models: [model('gpt-5.6-sol', ['low', 'high', 'xhigh'])]
+  };
+
+  const result = resolveAccountSelection(cache, {
+    model: 'gpt-5.6-sol',
+    reviewModel: 'gpt-5.6-sol',
+    modelReasoningEffort: 'high',
+    preferredReasoningEffort: 'xhigh'
+  });
+  assert.equal(result.selection.modelReasoningEffort, 'xhigh');
+  assert.equal(result.adjusted, false);
+});
+
 test('uses the selected model default instead of forcing Max', () => {
   const catalog = buildCustomModelCatalog({
     models: [

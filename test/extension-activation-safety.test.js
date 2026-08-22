@@ -401,6 +401,90 @@ test('activation safety and switching regressions', async (t) => {
     }
   });
 
+  await t.test('carries the most recent reasoning effort across provider switches', async () => {
+    const temporaryRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'codex-recent-effort-'));
+    const codexHome = path.join(temporaryRoot, 'codex-home');
+    const dataDir = path.join(codexHome, 'lab-provider-switcher');
+    const officialRoot = await createPatchedOfficialCodex(temporaryRoot);
+    await fs.promises.mkdir(dataDir, { recursive: true });
+    await fs.promises.writeFile(
+      path.join(codexHome, 'config.toml'),
+      [
+        'model_provider = "lab_relay"',
+        'model = "gpt-5.6-sol"',
+        'model_reasoning_effort = "xhigh"',
+        ''
+      ].join('\n'),
+      'utf8'
+    );
+    await fs.promises.writeFile(path.join(codexHome, 'models_cache.json'), JSON.stringify({
+      models: [{
+        slug: 'gpt-5.6-sol',
+        display_name: 'GPT-5.6-Sol',
+        default_reasoning_level: 'low',
+        supported_reasoning_levels: [
+          { effort: 'low' },
+          { effort: 'high' },
+          { effort: 'xhigh' }
+        ],
+        service_tiers: []
+      }]
+    }), 'utf8');
+    await fs.promises.writeFile(path.join(dataDir, 'settings.json'), JSON.stringify({
+      account: {
+        model: 'gpt-5.6-sol',
+        reviewModel: 'gpt-5.6-sol',
+        modelReasoningEffort: 'high'
+      },
+      lab: {
+        name: 'Custom Responses API',
+        baseUrl: 'https://gateway.example.com/v1',
+        model: 'gpt-5.6-sol',
+        reviewModel: 'gpt-5.6-sol',
+        modelReasoningEffort: 'xhigh',
+        httpHeaders: {}
+      }
+    }), 'utf8');
+
+    const vscode = baseVscodeMock({
+      getExtension(id) {
+        return id === 'openai.chatgpt'
+          ? { extensionPath: officialRoot, packageJSON: { version: 'fixture' } }
+          : undefined;
+      },
+      settings: {
+        autoReload: false,
+        autoPatchSharedHistory: false,
+        autoPatchMax: false
+      },
+      warningHandler(message) {
+        return message.includes('必须重载 VS Code 窗口') ? '切换并重载' : undefined;
+      }
+    });
+    const context = {
+      extensionPath: path.resolve(__dirname, '..'),
+      globalState: createGlobalState(),
+      subscriptions: []
+    };
+
+    try {
+      await loadExtensionWithMock(codexHome, vscode.api, async (extension) => {
+        await extension.activate(context);
+        await vscode.commands.get('labCodex.useAccount')();
+      });
+      const configText = await fs.promises.readFile(path.join(codexHome, 'config.toml'), 'utf8');
+      assert.match(configText, /^model_provider = "openai"/m);
+      assert.match(configText, /^model_reasoning_effort = "xhigh"/m);
+      const savedSettings = JSON.parse(await fs.promises.readFile(
+        path.join(dataDir, 'settings.json'),
+        'utf8'
+      ));
+      assert.equal(savedSettings.lastReasoningEffort, 'xhigh');
+    } finally {
+      await fs.promises.rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
   await t.test('keeps the current thread and reports provider takeover after the switched window activates', async () => {
     const temporaryRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'codex-provider-takeover-'));
     const codexHome = path.join(temporaryRoot, 'codex-home');

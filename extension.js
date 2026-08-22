@@ -404,6 +404,17 @@ function customSnapshot(configText, existing) {
 
 async function rememberActiveMode(context, configText, settings) {
   const provider = topLevelValue(configText, 'model_provider') || 'openai';
+  let activeReasoningEffort;
+  try {
+    activeReasoningEffort = normalizeReasoningEffort(
+      topLevelValue(configText, 'model_reasoning_effort')
+    );
+  } catch {
+    activeReasoningEffort = undefined;
+  }
+  if (activeReasoningEffort) {
+    settings.lastReasoningEffort = activeReasoningEffort;
+  }
   if (provider === 'openai') {
     settings.account = accountSnapshot(configText);
     await writeSettings(context, settings);
@@ -556,7 +567,10 @@ async function configureCustomApi(context) {
   await rememberActiveMode(context, activeConfig, settings);
   settings = await readSettings(context);
   const existing = settings.lab && typeof settings.lab === 'object' ? settings.lab : {};
-  const { selection } = await refreshCustomModelCatalog(context, existing);
+  const { selection } = await refreshCustomModelCatalog(context, {
+    ...existing,
+    preferredReasoningEffort: settings.lastReasoningEffort
+  });
   let existingBaseUrl;
   try {
     existingBaseUrl = normalizeHttpsBaseUrl(existing.baseUrl).baseUrl;
@@ -663,7 +677,10 @@ async function useCustomApi(context) {
   await rememberActiveMode(context, configText, settings);
   settings = await readSettings(context);
   custom = normalizeStoredCustom(settings.lab);
-  const { selection } = await refreshCustomModelCatalog(context, custom);
+  const { selection } = await refreshCustomModelCatalog(context, {
+    ...custom,
+    preferredReasoningEffort: settings.lastReasoningEffort
+  });
   custom = { ...custom, ...selection };
   settings.lab = custom;
   await writeSettings(context, settings);
@@ -694,7 +711,10 @@ async function useAccount(context) {
   const configText = await readConfig(context);
   await rememberActiveMode(context, configText, settings);
   const updatedSettings = await readSettings(context);
-  const accountValidation = await validatedAccountSnapshot(context, updatedSettings.account || {});
+  const accountValidation = await validatedAccountSnapshot(context, {
+    ...(updatedSettings.account || {}),
+    preferredReasoningEffort: updatedSettings.lastReasoningEffort
+  });
   const account = accountValidation.selection;
 
   if (!(await prepareProviderSwitch(context, 'ChatGPT 账户'))) {

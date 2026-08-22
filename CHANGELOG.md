@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.3.8
+
+- Carries the most recently used supported reasoning effort across ChatGPT-account and custom-API switches instead of restoring a stale target-specific `high` value.
+- Falls back to the target connection's saved effort and then the selected model default when the recent effort is unavailable.
+
 ## 2.3.7
 
 - Fixed custom API reconfiguration on Windows when an encrypted API key already exists. Secret rotation now uses a valid temporary backup path for atomic replacement and removes the backup afterward.
