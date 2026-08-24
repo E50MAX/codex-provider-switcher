@@ -4,13 +4,17 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   PROVIDER_TAKEOVER_PATCH_MARKER,
+  FIFTH_PROVIDER_TAKEOVER_PATCH_MARKER,
   INTERMEDIATE_PROVIDER_TAKEOVER_PATCH_MARKER,
   PREVIOUS_PROVIDER_TAKEOVER_PATCH_MARKER,
   OLDER_PROVIDER_TAKEOVER_PATCH_MARKER,
   LEGACY_PROVIDER_TAKEOVER_PATCH_MARKER,
   WRITER_CONFLICT_RETRY_LIMIT,
   WRITER_CONFLICT_RETRY_DELAY_MS,
+  PROVIDER_TAKEOVER_BLOCK_MARKER,
   patchProviderTakeoverSource,
+  patchProviderTakeoverResumeUiSource,
+  patchProviderTakeoverConversationUiSource,
   verifyProviderTakeoverComposerGateSource,
   verifyPatchedProviderTakeoverSource
 } = require('../lib/provider-takeover-patch');
@@ -36,17 +40,36 @@ const SEMICOLON_AWAIT_SOURCE = ORIGINAL_SOURCE.replace(
 function compilePatchedFixture() {
   const result = patchProviderTakeoverSource(ORIGINAL_SOURCE);
   assert.equal(result.status, 'patched');
-  assert.equal(result.replacementCount, 3);
+  assert.equal(result.replacementCount, 4);
   assert.equal(verifyPatchedProviderTakeoverSource(result.source), true);
   assert.equal(
     result.source.match(/already has an active writer/g)?.length,
-    20,
-    'the retry classifier and every fail-closed path must retain the writer-conflict gate'
+    2,
+    'only the official classifier and the genuine writer-conflict retry retain the writer text'
+  );
+  assert.equal(
+    result.source.match(new RegExp(PROVIDER_TAKEOVER_BLOCK_MARKER.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'))?.length,
+    19,
+    'every Provider Switcher fail-closed path must use the dedicated resume-block marker'
   );
   return {
     patchedSource: result.source,
     resume: new Function(result.source)()
   };
+}
+
+function fifthPatchedFixtureSource() {
+  const current = patchProviderTakeoverSource(ORIGINAL_SOURCE);
+  assert.equal(current.status, 'patched');
+  return current.source
+    .split(PROVIDER_TAKEOVER_PATCH_MARKER)
+    .join(FIFTH_PROVIDER_TAKEOVER_PATCH_MARKER)
+    .split(`${FIFTH_PROVIDER_TAKEOVER_PATCH_MARKER} ${PROVIDER_TAKEOVER_BLOCK_MARKER} `)
+    .join(`${FIFTH_PROVIDER_TAKEOVER_PATCH_MARKER} already has an active writer; `)
+    .replace(
+      `||String(e?.message??e).toLowerCase().includes(\`${PROVIDER_TAKEOVER_BLOCK_MARKER}\`)`,
+      ''
+    );
 }
 
 function legacyPatchedFixtureSource() {
@@ -297,6 +320,31 @@ function managerWithResponses(responses, settings = {}) {
 }
 
 test('provider takeover patch', async (t) => {
+  await t.test('shows Provider Switcher resume failures without mislabeling them as another app', () => {
+    const resumeUi = [
+      'function ce(e,t){let n=W(t);return n==null?f(t)?e.formatMessage({id:`localTaskRow.resumeLiveWriterError`}):e.formatMessage({id:`resumeError`}):e.formatMessage({id:`configError`})}',
+      'function hook(e){try{return null}catch(t){let n=t,l=true,h=f(n);h&&(close(),set(e));let g=false,m=false,T={current:false};!h&&ue({hasShownResumeError:T.current,isSubagentChildThread:m,shouldAutoRetry:g})&&danger(ce(intl,n))}}'
+    ].join('');
+    const resumeResult = patchProviderTakeoverResumeUiSource(resumeUi);
+    assert.equal(resumeResult.status, 'patched');
+    assert.match(resumeResult.source, /localTaskRow\.resumeLiveWriterError/);
+    assert.match(resumeResult.source, /resume-blocked/);
+    assert.equal(patchProviderTakeoverResumeUiSource(resumeResult.source).status, 'already-patched');
+
+    const conversationUi = [
+      'const title={id:`localConversation.writerConflict.title`,defaultMessage:`This is open in another app`,description:`Title shown when a conversation is already active elsewhere`};',
+      'const description={id:`localConversation.writerConflict.description`,defaultMessage:`Close it there to continue here.`,description:`Explanation shown when a conversation can be read but is actively being used elsewhere`};'
+    ].join('');
+    const conversationResult = patchProviderTakeoverConversationUiSource(conversationUi);
+    assert.equal(conversationResult.status, 'patched');
+    assert.doesNotMatch(conversationResult.source, /This is open in another app/);
+    assert.match(conversationResult.source, /Provider Switcher 已阻止恢复此对话/);
+    assert.equal(
+      patchProviderTakeoverConversationUiSource(conversationResult.source).status,
+      'already-patched'
+    );
+  });
+
   await t.test('recognizes only a writer-conflict gate that disables the composer', () => {
     const guarded = 'const {isResuming:p,isWriterConflict:m,retryResume:h}=resume();let v=!s||m,y=p&&!m,x=s&&!m;render({isReadOnly:v,isResuming:y,showComposer:x,retry:`localConversation.writerConflict.retry`,title:`This is open in another app`})';
     assert.equal(verifyProviderTakeoverComposerGateSource(guarded), true);
@@ -451,7 +499,7 @@ test('provider takeover patch', async (t) => {
     const result = patchProviderTakeoverSource(SEMICOLON_AWAIT_SOURCE);
 
     assert.equal(result.status, 'patched');
-    assert.equal(result.replacementCount, 3);
+    assert.equal(result.replacementCount, 4);
     assert.equal(result.source.includes('re=await te();'), true);
     assert.equal(verifyPatchedProviderTakeoverSource(result.source), true);
     assert.equal(patchProviderTakeoverSource(result.source).status, 'already-patched');
@@ -504,7 +552,7 @@ test('provider takeover patch', async (t) => {
 
     await assert.rejects(
       resume(manager, 'thread-1', { modelProvider: 'openai' }, {}),
-      /already has an active writer; selected provider is invalid; sending is blocked/
+      /resume-blocked.*selected provider is invalid; sending is blocked/
     );
     assert.deepEqual(manager.calls.map((call) => call.method), ['config/read']);
   });
@@ -583,7 +631,7 @@ test('provider takeover patch', async (t) => {
 
     await assert.rejects(
       resume(manager, 'thread-1', { modelProvider: 'lab_relay' }, {}),
-      /already has an active writer; active thread runtime selection mismatch; sending is blocked/
+      /resume-blocked.*active thread runtime selection mismatch; sending is blocked/
     );
     assert.deepEqual(
       manager.calls.map((call) => call.method),
@@ -600,7 +648,7 @@ test('provider takeover patch', async (t) => {
 
     await assert.rejects(
       resume(manager, 'thread-1', { modelProvider: 'lab_relay' }, {}),
-      /already has an active writer; runtime selection mismatch requires a window reload; sending is blocked/
+      /resume-blocked.*runtime selection mismatch requires a window reload; sending is blocked/
     );
     assert.deepEqual(manager.calls.map((call) => call.method), [
       'config/read',
@@ -619,7 +667,7 @@ test('provider takeover patch', async (t) => {
 
     await assert.rejects(
       resume(manager, 'thread-1', { modelProvider: 'lab_relay' }, {}),
-      /already has an active writer; could not unsubscribe from the previous provider; sending is blocked/
+      /resume-blocked.*could not unsubscribe from the previous provider; sending is blocked/
     );
     assert.deepEqual(
       manager.calls.map((call) => call.method),
@@ -658,6 +706,20 @@ test('provider takeover patch', async (t) => {
     ]);
   });
 
+  await t.test('upgrades the verified v5 patch to distinct resume-block diagnostics', () => {
+    const fifthSource = fifthPatchedFixtureSource();
+    assert.equal(fifthSource.includes(FIFTH_PROVIDER_TAKEOVER_PATCH_MARKER), true);
+    assert.equal(fifthSource.includes(PROVIDER_TAKEOVER_PATCH_MARKER), false);
+    assert.equal(fifthSource.includes(PROVIDER_TAKEOVER_BLOCK_MARKER), false);
+
+    const result = patchProviderTakeoverSource(fifthSource);
+    assert.equal(result.status, 'patched');
+    assert.equal(result.replacementCount, 2);
+    assert.equal(result.source.includes(FIFTH_PROVIDER_TAKEOVER_PATCH_MARKER), false);
+    assert.equal(result.source.includes(PROVIDER_TAKEOVER_BLOCK_MARKER), true);
+    assert.equal(verifyPatchedProviderTakeoverSource(result.source), true);
+  });
+
   await t.test('upgrades the verified v4 patch with account and model-state validation', () => {
     const intermediateSource = intermediatePatchedFixtureSource();
     assert.equal(
@@ -668,7 +730,7 @@ test('provider takeover patch', async (t) => {
 
     const result = patchProviderTakeoverSource(intermediateSource);
     assert.equal(result.status, 'patched');
-    assert.equal(result.replacementCount, 1);
+    assert.equal(result.replacementCount, 2);
     assert.equal(result.source.includes(INTERMEDIATE_PROVIDER_TAKEOVER_PATCH_MARKER), false);
     assert.equal(verifyPatchedProviderTakeoverSource(result.source), true);
     assert.equal(result.source.includes('sendRequest(`account/read`'), true);
@@ -682,7 +744,7 @@ test('provider takeover patch', async (t) => {
 
     const result = patchProviderTakeoverSource(previousSource);
     assert.equal(result.status, 'patched');
-    assert.equal(result.replacementCount, 1);
+    assert.equal(result.replacementCount, 2);
     assert.equal(result.source.includes(PREVIOUS_PROVIDER_TAKEOVER_PATCH_MARKER), false);
     assert.equal(verifyPatchedProviderTakeoverSource(result.source), true);
     assert.equal(result.source.includes('sendRequest(`config/read`'), true);
@@ -697,7 +759,7 @@ test('provider takeover patch', async (t) => {
 
     const result = patchProviderTakeoverSource(olderSource);
     assert.equal(result.status, 'patched');
-    assert.equal(result.replacementCount, 1);
+    assert.equal(result.replacementCount, 2);
     assert.equal(result.source.includes(OLDER_PROVIDER_TAKEOVER_PATCH_MARKER), false);
     assert.equal(verifyPatchedProviderTakeoverSource(result.source), true);
     assert.equal(result.source.includes('sendRequest(`config/read`'), true);
@@ -710,7 +772,7 @@ test('provider takeover patch', async (t) => {
 
     const result = patchProviderTakeoverSource(legacySource);
     assert.equal(result.status, 'patched');
-    assert.equal(result.replacementCount, 1);
+    assert.equal(result.replacementCount, 2);
     assert.equal(result.source.includes(LEGACY_PROVIDER_TAKEOVER_PATCH_MARKER), false);
     assert.equal(verifyPatchedProviderTakeoverSource(result.source), true);
     assert.equal(result.source.includes('re=await te()'), true);

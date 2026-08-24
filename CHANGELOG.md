@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.3.9
+
+- Separates Provider Switcher safety-block failures from genuine App Server writer conflicts, so configuration, model-catalog, login-state, and runtime-selection errors are no longer mislabeled as “open in another app.”
+- Keeps the composer fail-closed for both error classes, shows the detailed Provider Switcher resume error in a notification, and replaces the misleading writer-conflict banner with an actionable Provider Switcher message.
+- Automatically upgrades the verified v5 takeover patch and applies all three related webview changes transactionally with rollback.
+
 ## 2.3.8
 
 - Carries the most recently used supported reasoning effort across ChatGPT-account and custom-API switches instead of restoring a stale target-specific `high` value.

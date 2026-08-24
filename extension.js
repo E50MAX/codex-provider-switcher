@@ -33,10 +33,13 @@ const {
   PROVIDER_TAKEOVER_CONVERSATION_ASSET_NAME,
   THREAD_RESUME_MARKER,
   PROVIDER_TAKEOVER_PATCH_MARKER,
+  FIFTH_PROVIDER_TAKEOVER_PATCH_MARKER,
   INTERMEDIATE_PROVIDER_TAKEOVER_PATCH_MARKER,
   PREVIOUS_PROVIDER_TAKEOVER_PATCH_MARKER,
   OLDER_PROVIDER_TAKEOVER_PATCH_MARKER,
   LEGACY_PROVIDER_TAKEOVER_PATCH_MARKER,
+  patchProviderTakeoverConversationUiSource,
+  patchProviderTakeoverResumeUiSource,
   patchProviderTakeoverSource,
   verifyProviderTakeoverComposerGateSource
 } = require('./lib/provider-takeover-patch');
@@ -1039,6 +1042,7 @@ async function inspectCodexProviderTakeoverPatch() {
     if (
       source.includes(resumeSendMarker)
       || source.includes(PROVIDER_TAKEOVER_PATCH_MARKER)
+      || source.includes(FIFTH_PROVIDER_TAKEOVER_PATCH_MARKER)
       || source.includes(INTERMEDIATE_PROVIDER_TAKEOVER_PATCH_MARKER)
       || source.includes(PREVIOUS_PROVIDER_TAKEOVER_PATCH_MARKER)
       || source.includes(OLDER_PROVIDER_TAKEOVER_PATCH_MARKER)
@@ -1089,6 +1093,10 @@ async function inspectCodexProviderTakeoverPatch() {
       reason: '官方旧会话恢复界面缺少可验证的写入冲突阻断结构'
     };
   }
+  const resumeUiResult = patchProviderTakeoverResumeUiSource(resumeUiSource);
+  if (resumeUiResult.status !== 'patched' && resumeUiResult.status !== 'already-patched') {
+    return { status: 'unsupported', version, reason: resumeUiResult.reason };
+  }
 
   const conversationUiNames = assetNames.filter(
     (name) => PROVIDER_TAKEOVER_CONVERSATION_ASSET_NAME.test(name)
@@ -1117,39 +1125,78 @@ async function inspectCodexProviderTakeoverPatch() {
       reason: '官方旧会话输入框缺少可验证的写入冲突禁用结构'
     };
   }
-  if (target.result.status === 'already-patched') {
-    return { status: 'already-patched', version, assetPath: target.assetPath };
+  const conversationUiResult = patchProviderTakeoverConversationUiSource(conversationUiSource);
+  if (
+    conversationUiResult.status !== 'patched'
+    && conversationUiResult.status !== 'already-patched'
+  ) {
+    return { status: 'unsupported', version, reason: conversationUiResult.reason };
+  }
+
+  const inspectedTargets = [
+    { kind: 'provider', assetPath: target.assetPath, source: target.source, result: target.result },
+    { kind: 'resume-ui', assetPath: resumeUiPath, source: resumeUiSource, result: resumeUiResult },
+    {
+      kind: 'conversation-ui',
+      assetPath: conversationUiPath,
+      source: conversationUiSource,
+      result: conversationUiResult
+    }
+  ];
+  const targets = inspectedTargets
+    .filter((item) => item.result.status === 'patched')
+    .map((item) => ({
+      kind: item.kind,
+      assetPath: item.assetPath,
+      originalSource: item.source,
+      patchedSource: item.result.source,
+      replacementCount: item.result.replacementCount
+    }));
+  if (targets.length === 0) {
+    return { status: 'already-patched', version };
   }
   return {
     status: 'ready',
     version,
-    assetPath: target.assetPath,
-    patchedSource: target.result.source,
-    replacementCount: target.result.replacementCount
+    targets,
+    replacementCount: targets.reduce((total, item) => total + item.replacementCount, 0)
   };
 }
 
 async function applyCodexProviderTakeoverPatch(inspection) {
-  const currentSource = await readCodexAsset(inspection.assetPath);
-  const currentResult = patchProviderTakeoverSource(currentSource);
-  if (currentResult.status === 'already-patched') {
-    return { status: 'already-patched' };
-  }
-  if (currentResult.status !== 'patched' || currentResult.source !== inspection.patchedSource) {
-    throw new Error('Codex Provider 接管资源在确认后发生变化，已取消修复');
+  const patchers = {
+    provider: patchProviderTakeoverSource,
+    'resume-ui': patchProviderTakeoverResumeUiSource,
+    'conversation-ui': patchProviderTakeoverConversationUiSource
+  };
+  const verifiedTargets = [];
+  for (const target of inspection.targets) {
+    const currentSource = await readCodexAsset(target.assetPath);
+    const currentResult = patchers[target.kind](currentSource);
+    if (currentResult.status === 'already-patched') {
+      continue;
+    }
+    if (currentResult.status !== 'patched' || currentResult.source !== target.patchedSource) {
+      throw new Error('Codex Provider 接管资源在确认后发生变化，已取消修复');
+    }
+    verifiedTargets.push({ ...target, originalSource: currentSource });
   }
 
-  await replaceVerified({
-    filePath: inspection.assetPath,
-    originalSource: currentSource,
-    patchedSource: currentResult.source,
+  const writtenCount = await writeVerifiedBatch({
+    targets: verifiedTargets.map((target) => ({
+      kind: target.kind,
+      filePath: target.assetPath,
+      originalSource: target.originalSource,
+      patchedSource: target.patchedSource
+    })),
     readFile: readCodexAsset,
     writeFile: atomicWriteFile,
-    verify: (source) => patchProviderTakeoverSource(source).status === 'already-patched',
+    verify: (source, target) => patchers[target.kind](source).status === 'already-patched',
+    changedBeforeWriteError: 'Codex Provider 接管资源在写入前发生变化，已取消修复',
     verificationError: '写入后的旧会话 Provider 接管修复未通过结构校验',
     rollbackConflictError: 'Codex Provider 接管资源在回滚前被其他程序修改，已拒绝覆盖'
   });
-  return { status: 'patched' };
+  return { status: writtenCount > 0 ? 'patched' : 'already-patched' };
 }
 
 async function inspectCodexMaxPatch() {

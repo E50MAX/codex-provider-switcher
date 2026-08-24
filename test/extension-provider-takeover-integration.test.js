@@ -6,7 +6,11 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const Module = require('node:module');
-const { patchProviderTakeoverSource } = require('../lib/provider-takeover-patch');
+const {
+  patchProviderTakeoverConversationUiSource,
+  patchProviderTakeoverResumeUiSource,
+  patchProviderTakeoverSource
+} = require('../lib/provider-takeover-patch');
 
 const extensionModulePath = require.resolve('../extension');
 const ORIGINAL_PROVIDER_SOURCE = [
@@ -49,12 +53,22 @@ async function createFixture() {
   await fs.promises.writeFile(assetPath, ORIGINAL_PROVIDER_SOURCE, 'utf8');
   await fs.promises.writeFile(
     resumeUiPath,
-    'import"./app-initial-provider-fixture.js";const gate={isWriterConflict:true,retryResume:true,id:"localTaskRow.resumeLiveWriterError"};',
+    [
+      'import"./app-initial-provider-fixture.js";',
+      'function ce(e,t){let n=W(t);return n==null?f(t)?e.formatMessage({id:`localTaskRow.resumeLiveWriterError`}):e.formatMessage({id:`resumeError`}):e.formatMessage({id:`configError`})}',
+      'function hook(e){try{return null}catch(t){let n=t,l=true,h=f(n);h&&(close(),set(e));let g=false,m=false,T={current:false};!h&&ue({hasShownResumeError:T.current,isSubagentChildThread:m,shouldAutoRetry:g})&&danger(ce(intl,n))}}',
+      'const gate={isWriterConflict:true,retryResume:true};'
+    ].join(''),
     'utf8'
   );
   await fs.promises.writeFile(
     conversationUiPath,
-    'import"./use-resume-conversation-if-needed-fixture.js";function view(s){const {isResuming:p,isWriterConflict:m,retryResume:h}=resume();let v=!s||m,y=p&&!m,x=s&&!m;return render({isReadOnly:v,isResuming:y,showComposer:x,retry:"localConversation.writerConflict.retry",title:"This is open in another app"})}',
+    [
+      'import"./use-resume-conversation-if-needed-fixture.js";',
+      'const title={id:`localConversation.writerConflict.title`,defaultMessage:`This is open in another app`,description:`Title shown when a conversation is already active elsewhere`};',
+      'const description={id:`localConversation.writerConflict.description`,defaultMessage:`Close it there to continue here.`,description:`Explanation shown when a conversation can be read but is actively being used elsewhere`};',
+      'function view(s){const {isResuming:p,isWriterConflict:m,retryResume:h}=resume();let v=!s||m,y=p&&!m,x=s&&!m;return render({isReadOnly:v,isResuming:y,showComposer:x,retry:`localConversation.writerConflict.retry`,title})}'
+    ].join(''),
     'utf8'
   );
   return {
@@ -171,8 +185,15 @@ test('provider takeover activation repair', async (t) => {
     try {
       await activateFixture(fixture, globalState, vscode);
       const source = await fs.promises.readFile(fixture.assetPath, 'utf8');
+      const resumeUiSource = await fs.promises.readFile(fixture.resumeUiPath, 'utf8');
+      const conversationUiSource = await fs.promises.readFile(fixture.conversationUiPath, 'utf8');
 
       assert.equal(patchProviderTakeoverSource(source).status, 'already-patched');
+      assert.equal(patchProviderTakeoverResumeUiSource(resumeUiSource).status, 'already-patched');
+      assert.equal(
+        patchProviderTakeoverConversationUiSource(conversationUiSource).status,
+        'already-patched'
+      );
       assert.equal(globalState.get('provider-takeover-patch-consent-v1'), true);
       assert.ok(vscode.commands.has('labCodex.repairProviderTakeover'));
       assert.equal(vscode.warnings.length, 1);
@@ -189,8 +210,15 @@ test('provider takeover activation repair', async (t) => {
     try {
       await activateFixture(fixture, globalState, vscode);
       const source = await fs.promises.readFile(fixture.assetPath, 'utf8');
+      const resumeUiSource = await fs.promises.readFile(fixture.resumeUiPath, 'utf8');
+      const conversationUiSource = await fs.promises.readFile(fixture.conversationUiPath, 'utf8');
 
       assert.equal(patchProviderTakeoverSource(source).status, 'already-patched');
+      assert.equal(patchProviderTakeoverResumeUiSource(resumeUiSource).status, 'already-patched');
+      assert.equal(
+        patchProviderTakeoverConversationUiSource(conversationUiSource).status,
+        'already-patched'
+      );
       assert.equal(vscode.warnings.length, 0);
     } finally {
       await fs.promises.rm(fixture.temporaryRoot, { recursive: true, force: true });

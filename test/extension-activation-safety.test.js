@@ -6,7 +6,11 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const Module = require('node:module');
-const { patchProviderTakeoverSource } = require('../lib/provider-takeover-patch');
+const {
+  patchProviderTakeoverConversationUiSource,
+  patchProviderTakeoverResumeUiSource,
+  patchProviderTakeoverSource
+} = require('../lib/provider-takeover-patch');
 
 const extensionModulePath = require.resolve('../extension');
 const LEGACY_EXTENSION_ID = 'lab-local.codex-provider-switcher';
@@ -28,6 +32,20 @@ async function createPatchedOfficialCodex(temporaryRoot) {
   await fs.promises.mkdir(assetsPath, { recursive: true });
   const patched = patchProviderTakeoverSource(ORIGINAL_PROVIDER_WEBVIEW_SOURCE);
   assert.equal(patched.status, 'patched');
+  const resumeUi = patchProviderTakeoverResumeUiSource([
+    'import"./app-initial-provider-fixture.js";',
+    'function ce(e,t){let n=W(t);return n==null?f(t)?e.formatMessage({id:`localTaskRow.resumeLiveWriterError`}):e.formatMessage({id:`resumeError`}):e.formatMessage({id:`configError`})}',
+    'function hook(e){try{return null}catch(t){let n=t,l=true,h=f(n);h&&(close(),set(e));let g=false,m=false,T={current:false};!h&&ue({hasShownResumeError:T.current,isSubagentChildThread:m,shouldAutoRetry:g})&&danger(ce(intl,n))}}',
+    'const gate={isWriterConflict:true,retryResume:true};'
+  ].join(''));
+  assert.equal(resumeUi.status, 'patched');
+  const conversationUi = patchProviderTakeoverConversationUiSource([
+    'import"./use-resume-conversation-if-needed-fixture.js";',
+    'const title={id:`localConversation.writerConflict.title`,defaultMessage:`This is open in another app`,description:`Title shown when a conversation is already active elsewhere`};',
+    'const description={id:`localConversation.writerConflict.description`,defaultMessage:`Close it there to continue here.`,description:`Explanation shown when a conversation can be read but is actively being used elsewhere`};',
+    'function view(s){const {isResuming:p,isWriterConflict:m,retryResume:h}=resume();let v=!s||m,y=p&&!m,x=s&&!m;return render({isReadOnly:v,isResuming:y,showComposer:x,retry:`localConversation.writerConflict.retry`,title})}'
+  ].join(''));
+  assert.equal(conversationUi.status, 'patched');
   await fs.promises.writeFile(
     path.join(assetsPath, 'app-initial-provider-fixture.js'),
     patched.source,
@@ -35,12 +53,12 @@ async function createPatchedOfficialCodex(temporaryRoot) {
   );
   await fs.promises.writeFile(
     path.join(assetsPath, 'use-resume-conversation-if-needed-fixture.js'),
-    'import"./app-initial-provider-fixture.js";const gate={isWriterConflict:true,retryResume:true,id:"localTaskRow.resumeLiveWriterError"};',
+    resumeUi.source,
     'utf8'
   );
   await fs.promises.writeFile(
     path.join(assetsPath, 'local-conversation-thread-fixture.js'),
-    'import"./use-resume-conversation-if-needed-fixture.js";function view(s){const {isResuming:p,isWriterConflict:m,retryResume:h}=resume();let v=!s||m,y=p&&!m,x=s&&!m;return render({isReadOnly:v,isResuming:y,showComposer:x,retry:"localConversation.writerConflict.retry",title:"This is open in another app"})}',
+    conversationUi.source,
     'utf8'
   );
   return officialRoot;
