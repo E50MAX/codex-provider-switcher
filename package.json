@@ -2,7 +2,7 @@
   "name": "codex-provider-switcher",
   "displayName": "Secure Codex Provider Switcher (Unofficial)",
   "description": "在原生 Windows 中安全切换 Codex 新旧会话的 OpenAI 官方连接与自定义 HTTPS Responses API，并共享本地历史。",
-  "version": "2.3.10",
+  "version": "2.3.11",
   "publisher": "e50max",
   "author": {
     "name": "E50MAX"
