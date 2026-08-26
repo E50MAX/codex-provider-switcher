@@ -1,8 +1,8 @@
 {
   "name": "codex-provider-switcher",
   "displayName": "Secure Codex Provider Switcher (Unofficial)",
-  "description": "安全切换 Codex 新旧会话的 ChatGPT 账户与自定义 HTTPS Responses API，并共享本地历史。",
-  "version": "2.3.9",
+  "description": "在原生 Windows 中安全切换 Codex 新旧会话的 OpenAI 官方连接与自定义 HTTPS Responses API，并共享本地历史。",
+  "version": "2.3.10",
   "publisher": "e50max",
   "author": {
     "name": "E50MAX"
@@ -47,7 +47,7 @@
       "supported": true
     },
     "virtualWorkspaces": {
-      "supported": true
+      "supported": false
     }
   },
   "activationEvents": [
@@ -65,7 +65,7 @@
     "commands": [
       {
         "command": "labCodex.switchConnection",
-        "title": "Codex: 切换账户 / 自定义 API",
+        "title": "Codex: 切换 OpenAI / 自定义 API",
         "icon": "$(arrow-swap)"
       },
       {
@@ -75,7 +75,7 @@
       },
       {
         "command": "labCodex.useAccount",
-        "title": "Codex: 使用 ChatGPT 账户",
+        "title": "Codex: 使用 OpenAI 官方连接",
         "icon": "$(account)"
       },
       {
@@ -85,7 +85,7 @@
       },
       {
         "command": "labCodex.repairSharedHistory",
-        "title": "Codex: 修复账户 / API 共享历史",
+        "title": "Codex: 修复 OpenAI / 自定义 API 共享历史",
         "icon": "$(history)"
       },
       {
@@ -110,7 +110,7 @@
         "labCodex.autoReload": {
           "type": "boolean",
           "default": true,
-          "description": "切换 Provider 时自动重载 VS Code 窗口；关闭后，每次切换都必须手动确认“切换并重载”。"
+          "description": "切换 Provider 或更新正在使用的自定义 API 时自动重载 VS Code 窗口；关闭后，每次操作都必须先明确确认并重载。"
         },
         "labCodex.autoPatchProviderTakeover": {
           "type": "boolean",

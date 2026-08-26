@@ -114,14 +114,19 @@ async function loadExtensionWithMock(codexHome, vscodeApi, run) {
 function baseVscodeMock({
   getExtension,
   settings = {},
+  chatgptSettings = {},
+  remoteName,
   warningHandler,
   informationHandler,
+  errorHandler,
   inputHandler,
-  quickPickHandler
+  quickPickHandler,
+  executeCommandHandler
 }) {
   const commands = new Map();
   const warnings = [];
   const information = [];
+  const errors = [];
   const executedCommands = [];
   const quickPicks = [];
   const statusBar = { text: '', tooltip: '', show() {}, dispose() {} };
@@ -129,10 +134,12 @@ function baseVscodeMock({
     commands,
     warnings,
     information,
+    errors,
     executedCommands,
     quickPicks,
     statusBar,
     api: {
+      env: { remoteName },
       StatusBarAlignment: { Right: 1 },
       commands: {
         registerCommand(command, handler) {
@@ -141,6 +148,7 @@ function baseVscodeMock({
         },
         async executeCommand(...args) {
           executedCommands.push(args);
+          return executeCommandHandler?.(...args);
         }
       },
       extensions: {
@@ -150,10 +158,11 @@ function baseVscodeMock({
         }
       },
       workspace: {
-        getConfiguration() {
+        getConfiguration(section) {
+          const values = section === 'chatgpt' ? chatgptSettings : settings;
           return {
             get(key, fallback) {
-              return Object.hasOwn(settings, key) ? settings[key] : fallback;
+              return Object.hasOwn(values, key) ? values[key] : fallback;
             }
           };
         }
@@ -171,7 +180,10 @@ function baseVscodeMock({
           information.push(message);
           return informationHandler?.(message, args);
         },
-        async showErrorMessage() {},
+        async showErrorMessage(message, ...args) {
+          errors.push(message);
+          return errorHandler?.(message, args);
+        },
         async showInputBox(options) {
           return inputHandler?.(options);
         },
@@ -287,7 +299,7 @@ test('activation safety and switching regressions', async (t) => {
         return message.includes('必须重载 VS Code 窗口') ? '切换并重载' : undefined;
       },
       informationHandler(message) {
-        return message.includes('当前连接仍是 ChatGPT 账户') ? '立即切换到自定义 API' : undefined;
+        return message.includes('当前连接仍为 OpenAI 官方连接') ? '立即切换到自定义 API' : undefined;
       },
       inputHandler() {
         return inputs.shift();
@@ -307,7 +319,7 @@ test('activation safety and switching regressions', async (t) => {
       const configText = await fs.promises.readFile(path.join(codexHome, 'config.toml'), 'utf8');
       assert.match(configText, /^model_provider = "lab_relay"/m);
       assert.doesNotMatch(configText, /^service_tier\s*=/m);
-      assert.ok(vscode.information.some((message) => message.includes('当前连接仍是 ChatGPT 账户')));
+      assert.ok(vscode.information.some((message) => message.includes('当前连接仍为 OpenAI 官方连接')));
       assert.deepEqual(context.globalState.get('pending-provider-switch-v2'), {
         provider: 'lab_relay',
         label: '自定义 API'
@@ -411,7 +423,7 @@ test('activation safety and switching regressions', async (t) => {
       assert.doesNotMatch(configText, /^service_tier\s*=/m);
       assert.deepEqual(context.globalState.get('pending-provider-switch-v2'), {
         provider: 'openai',
-        label: 'ChatGPT 账户',
+        label: 'OpenAI 官方连接',
         accountSelectionAdjusted: true
       });
     } finally {
@@ -507,12 +519,14 @@ test('activation safety and switching regressions', async (t) => {
     const temporaryRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'codex-provider-takeover-'));
     const codexHome = path.join(temporaryRoot, 'codex-home');
     const officialRoot = await createPatchedOfficialCodex(temporaryRoot);
-    await fs.promises.mkdir(codexHome, { recursive: true });
+    const dataDir = path.join(codexHome, 'lab-provider-switcher');
+    await fs.promises.mkdir(dataDir, { recursive: true });
     await fs.promises.writeFile(
       path.join(codexHome, 'config.toml'),
       'model_provider = "lab_relay"\n',
       'utf8'
     );
+    await fs.promises.writeFile(path.join(dataDir, 'api-key.v2.dpapi'), 'encrypted-fixture');
 
     const vscode = baseVscodeMock({
       getExtension(id) {
@@ -521,6 +535,7 @@ test('activation safety and switching regressions', async (t) => {
           : undefined;
       },
       settings: {
+        autoPatchProviderTakeover: false,
         autoPatchSharedHistory: false,
         autoPatchMax: false
       }
@@ -545,6 +560,421 @@ test('activation safety and switching regressions', async (t) => {
       assert.equal(globalState.get('pending-fresh-chat-after-provider-switch-v1'), undefined);
       assert.match(vscode.statusBar.text, /Codex 当前: API/);
       assert.ok(vscode.information.some((message) => message.includes('保留原 thread ID')));
+    } finally {
+      await fs.promises.rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  await t.test('does not report a completed custom switch when the encrypted key vanished before reload', async () => {
+    const temporaryRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'codex-missing-key-reload-'));
+    const codexHome = path.join(temporaryRoot, 'codex-home');
+    const officialRoot = await createPatchedOfficialCodex(temporaryRoot);
+    await fs.promises.mkdir(codexHome, { recursive: true });
+    await fs.promises.writeFile(path.join(codexHome, 'config.toml'), 'model_provider = "lab_relay"\n');
+    const vscode = baseVscodeMock({
+      getExtension(id) {
+        return id === 'openai.chatgpt'
+          ? { extensionPath: officialRoot, packageJSON: { version: 'fixture' } }
+          : undefined;
+      },
+      settings: {
+        autoPatchProviderTakeover: false,
+        autoPatchSharedHistory: false,
+        autoPatchMax: false
+      }
+    });
+    const globalState = createGlobalState({
+      'pending-provider-switch-v2': { provider: 'lab_relay', label: '自定义 API' }
+    });
+    const context = {
+      extensionPath: path.resolve(__dirname, '..'),
+      globalState,
+      subscriptions: []
+    };
+
+    try {
+      await loadExtensionWithMock(codexHome, vscode.api, async (extension) => {
+        await extension.activate(context);
+      });
+      assert.match(vscode.statusBar.text, /API: 缺少密钥/);
+      assert.ok(vscode.warnings.some((message) => message.includes('加密 API Key 缺失')));
+      assert.equal(vscode.information.some((message) => message.includes('已切换到自定义 API')), false);
+      assert.equal(globalState.get('pending-provider-switch-v2'), undefined);
+    } finally {
+      await fs.promises.rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  await t.test('stops before filesystem mutations in VS Code Remote or Codex WSL mode', {
+    skip: process.platform !== 'win32'
+  }, async (environmentTest) => {
+    const cases = [
+      { name: 'VS Code Remote', remoteName: 'wsl', chatgptSettings: {} },
+      {
+        name: 'Codex WSL setting',
+        remoteName: undefined,
+        chatgptSettings: { runCodexInWindowsSubsystemForLinux: true }
+      }
+    ];
+
+    for (const environmentCase of cases) {
+      await environmentTest.test(environmentCase.name, async () => {
+        const temporaryRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'codex-environment-guard-'));
+        const codexHome = path.join(temporaryRoot, 'codex-home');
+        const vscode = baseVscodeMock({
+          getExtension() { return undefined; },
+          remoteName: environmentCase.remoteName,
+          chatgptSettings: environmentCase.chatgptSettings
+        });
+        const context = {
+          extensionPath: path.resolve(__dirname, '..'),
+          globalState: createGlobalState(),
+          subscriptions: []
+        };
+
+        try {
+          await loadExtensionWithMock(codexHome, vscode.api, async (extension) => {
+            await extension.activate(context);
+            await vscode.commands.get('labCodex.useAccount')();
+          });
+          assert.equal(fs.existsSync(codexHome), false);
+          assert.equal(vscode.commands.size, 8);
+          assert.match(vscode.statusBar.text, /环境不受支持/);
+          assert.ok(vscode.warnings.some((message) => message.includes('已停止')));
+          assert.ok(vscode.errors.some((message) => message.includes('原生 Windows 本地窗口')));
+        } finally {
+          await fs.promises.rm(temporaryRoot, { recursive: true, force: true });
+        }
+      });
+    }
+  });
+
+  await t.test('recognizes commented TOML and does not mislabel an unmanaged provider as OpenAI', async () => {
+    const temporaryRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'codex-commented-provider-'));
+    const codexHome = path.join(temporaryRoot, 'codex-home');
+    await fs.promises.mkdir(codexHome, { recursive: true });
+    await fs.promises.writeFile(
+      path.join(codexHome, 'config.toml'),
+      "model_provider = 'third_party' # intentionally unmanaged\n",
+      'utf8'
+    );
+    const vscode = baseVscodeMock({
+      getExtension() { return undefined; },
+      settings: {
+        autoPatchProviderTakeover: false,
+        autoPatchSharedHistory: false,
+        autoPatchMax: false
+      }
+    });
+    const context = {
+      extensionPath: path.resolve(__dirname, '..'),
+      globalState: createGlobalState(),
+      subscriptions: []
+    };
+
+    try {
+      await loadExtensionWithMock(codexHome, vscode.api, async (extension) => {
+        await extension.activate(context);
+        await vscode.commands.get('labCodex.switchConnection')();
+      });
+      assert.match(vscode.statusBar.text, /Codex 默认: 其他/);
+      assert.match(vscode.statusBar.tooltip, /third_party/);
+      const [{ items }] = vscode.quickPicks;
+      assert.equal(items.find((item) => item.target === 'account').picked, false);
+      assert.equal(items.find((item) => item.target === 'custom').picked, false);
+    } finally {
+      await fs.promises.rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  await t.test('keeps commands available but performs no repair when top-level config is ambiguous', async () => {
+    const temporaryRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'codex-ambiguous-provider-'));
+    const codexHome = path.join(temporaryRoot, 'codex-home');
+    await fs.promises.mkdir(codexHome, { recursive: true });
+    const configPath = path.join(codexHome, 'config.toml');
+    const ambiguousConfig = 'model_provider = "openai"\nmodel_provider = "lab_relay"\n';
+    await fs.promises.writeFile(configPath, ambiguousConfig, 'utf8');
+    const vscode = baseVscodeMock({ getExtension() { return undefined; } });
+    const context = {
+      extensionPath: path.resolve(__dirname, '..'),
+      globalState: createGlobalState(),
+      subscriptions: []
+    };
+
+    try {
+      await loadExtensionWithMock(codexHome, vscode.api, async (extension) => {
+        await extension.activate(context);
+        await vscode.commands.get('labCodex.switchConnection')();
+      });
+      assert.equal(await fs.promises.readFile(configPath, 'utf8'), ambiguousConfig);
+      assert.match(vscode.statusBar.text, /连接配置错误/);
+      assert.ok(vscode.warnings.some((message) => message.includes('未修改连接配置')));
+      assert.ok(vscode.errors.some((message) => message.includes('model_provider 重复')));
+    } finally {
+      await fs.promises.rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  await t.test('requires and performs a reload when the active custom API is updated', {
+    skip: process.platform !== 'win32'
+  }, async () => {
+    const temporaryRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'codex-active-api-update-'));
+    const codexHome = path.join(temporaryRoot, 'codex-home');
+    const dataDir = path.join(codexHome, 'lab-provider-switcher');
+    const officialRoot = await createPatchedOfficialCodex(temporaryRoot);
+    await fs.promises.mkdir(dataDir, { recursive: true });
+    const originalConfig = 'model_provider = "lab_relay" # active relay\n';
+    await fs.promises.writeFile(path.join(codexHome, 'config.toml'), originalConfig, 'utf8');
+    await fs.promises.writeFile(path.join(codexHome, 'models_cache.json'), JSON.stringify({
+      models: [{
+        slug: 'gpt-5.6-sol',
+        display_name: 'GPT-5.6-Sol',
+        supported_reasoning_levels: [{ effort: 'high' }]
+      }]
+    }), 'utf8');
+    await fs.promises.writeFile(path.join(dataDir, 'settings.json'), JSON.stringify({
+      lab: {
+        name: 'Custom Responses API',
+        baseUrl: 'https://old.example.com/v1',
+        model: 'gpt-5.6-sol',
+        reviewModel: 'gpt-5.6-sol',
+        modelReasoningEffort: 'high',
+        httpHeaders: {}
+      }
+    }), 'utf8');
+    const inputs = ['https://new.example.com/v1', 'test_key_1234567890'];
+    const vscode = baseVscodeMock({
+      getExtension(id) {
+        return id === 'openai.chatgpt'
+          ? { extensionPath: officialRoot, packageJSON: { version: 'fixture' } }
+          : undefined;
+      },
+      settings: {
+        autoReload: false,
+        autoPatchProviderTakeover: false,
+        autoPatchSharedHistory: false,
+        autoPatchMax: false
+      },
+      warningHandler(message) {
+        if (message.includes('确认自定义 API 主机')) {
+          return '信任并继续';
+        }
+        return message.includes('必须重载 VS Code 窗口') ? '切换并重载' : undefined;
+      },
+      inputHandler() { return inputs.shift(); }
+    });
+    const context = {
+      extensionPath: path.resolve(__dirname, '..'),
+      globalState: createGlobalState(),
+      subscriptions: []
+    };
+
+    try {
+      await loadExtensionWithMock(codexHome, vscode.api, async (extension) => {
+        await extension.activate(context);
+        await vscode.commands.get('labCodex.configureLab')();
+      });
+      const configText = await fs.promises.readFile(path.join(codexHome, 'config.toml'), 'utf8');
+      assert.match(configText, /base_url = "https:\/\/new\.example\.com\/v1"/);
+      assert.deepEqual(context.globalState.get('pending-provider-switch-v2'), {
+        provider: 'lab_relay',
+        label: '更新后的自定义 API',
+        configurationUpdate: true
+      });
+      assert.match(vscode.statusBar.text, /Codex 默认: API/);
+      assert.ok(vscode.executedCommands.some(([command]) => command === 'workbench.action.reloadWindow'));
+      assert.equal(fs.existsSync(path.join(dataDir, 'api-key.v2.dpapi')), true);
+    } finally {
+      await fs.promises.rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  await t.test('does not save an active API update when the required reload is declined', {
+    skip: process.platform !== 'win32'
+  }, async () => {
+    const temporaryRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'codex-active-api-cancel-'));
+    const codexHome = path.join(temporaryRoot, 'codex-home');
+    const dataDir = path.join(codexHome, 'lab-provider-switcher');
+    const officialRoot = await createPatchedOfficialCodex(temporaryRoot);
+    await fs.promises.mkdir(dataDir, { recursive: true });
+    const originalConfig = 'model_provider = "lab_relay"\n';
+    await fs.promises.writeFile(path.join(codexHome, 'config.toml'), originalConfig, 'utf8');
+    await fs.promises.writeFile(path.join(codexHome, 'models_cache.json'), JSON.stringify({
+      models: [{ slug: 'gpt-5.6-sol', supported_reasoning_levels: [{ effort: 'high' }] }]
+    }), 'utf8');
+    await fs.promises.writeFile(path.join(dataDir, 'settings.json'), JSON.stringify({
+      lab: {
+        baseUrl: 'https://old.example.com/v1',
+        model: 'gpt-5.6-sol',
+        reviewModel: 'gpt-5.6-sol',
+        modelReasoningEffort: 'high',
+        httpHeaders: {}
+      }
+    }), 'utf8');
+    const inputs = ['https://new.example.com/v1', 'test_key_1234567890'];
+    const vscode = baseVscodeMock({
+      getExtension(id) {
+        return id === 'openai.chatgpt'
+          ? { extensionPath: officialRoot, packageJSON: { version: 'fixture' } }
+          : undefined;
+      },
+      settings: {
+        autoReload: false,
+        autoPatchProviderTakeover: false,
+        autoPatchSharedHistory: false,
+        autoPatchMax: false
+      },
+      warningHandler(message) {
+        return message.includes('确认自定义 API 主机') ? '信任并继续' : undefined;
+      },
+      inputHandler() { return inputs.shift(); }
+    });
+    const context = {
+      extensionPath: path.resolve(__dirname, '..'),
+      globalState: createGlobalState(),
+      subscriptions: []
+    };
+
+    try {
+      await loadExtensionWithMock(codexHome, vscode.api, async (extension) => {
+        await extension.activate(context);
+        await vscode.commands.get('labCodex.configureLab')();
+      });
+      assert.equal(await fs.promises.readFile(path.join(codexHome, 'config.toml'), 'utf8'), originalConfig);
+      assert.equal(fs.existsSync(path.join(dataDir, 'api-key.v2.dpapi')), false);
+      assert.equal(context.globalState.get('pending-provider-switch-v2'), undefined);
+      assert.equal(vscode.executedCommands.some(([command]) => command === 'workbench.action.reloadWindow'), false);
+    } finally {
+      await fs.promises.rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  await t.test('reloads immediately after deleting the key used by the active custom API', {
+    skip: process.platform !== 'win32'
+  }, async () => {
+    const temporaryRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'codex-active-key-delete-'));
+    const codexHome = path.join(temporaryRoot, 'codex-home');
+    const dataDir = path.join(codexHome, 'lab-provider-switcher');
+    const secretPath = path.join(dataDir, 'api-key.v2.dpapi');
+    await fs.promises.mkdir(dataDir, { recursive: true });
+    await fs.promises.writeFile(path.join(codexHome, 'config.toml'), 'model_provider = "lab_relay"\n');
+    await fs.promises.writeFile(secretPath, 'encrypted-fixture');
+    const vscode = baseVscodeMock({
+      getExtension() { return undefined; },
+      settings: {
+        autoReload: false,
+        autoPatchProviderTakeover: false,
+        autoPatchSharedHistory: false,
+        autoPatchMax: false
+      },
+      warningHandler(message) {
+        return message.includes('删除本机保存的自定义 API Key')
+          ? '删除密钥并重载'
+          : undefined;
+      }
+    });
+    const context = {
+      extensionPath: path.resolve(__dirname, '..'),
+      globalState: createGlobalState(),
+      subscriptions: []
+    };
+
+    try {
+      await loadExtensionWithMock(codexHome, vscode.api, async (extension) => {
+        await extension.activate(context);
+        await vscode.commands.get('labCodex.deleteLabKey')();
+      });
+      assert.equal(fs.existsSync(secretPath), false);
+      assert.match(vscode.statusBar.text, /API: 缺少密钥/);
+      assert.ok(vscode.executedCommands.some(([command]) => command === 'workbench.action.reloadWindow'));
+    } finally {
+      await fs.promises.rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  await t.test('serializes overlapping connection commands', async () => {
+    const temporaryRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'codex-command-mutex-'));
+    const codexHome = path.join(temporaryRoot, 'codex-home');
+    let resolveQuickPick;
+    let signalQuickPick;
+    const quickPickEntered = new Promise((resolve) => { signalQuickPick = resolve; });
+    const vscode = baseVscodeMock({
+      getExtension() { return undefined; },
+      settings: {
+        autoPatchProviderTakeover: false,
+        autoPatchSharedHistory: false,
+        autoPatchMax: false
+      },
+      quickPickHandler() {
+        signalQuickPick();
+        return new Promise((resolve) => { resolveQuickPick = resolve; });
+      }
+    });
+    const context = {
+      extensionPath: path.resolve(__dirname, '..'),
+      globalState: createGlobalState(),
+      subscriptions: []
+    };
+
+    try {
+      await loadExtensionWithMock(codexHome, vscode.api, async (extension) => {
+        await extension.activate(context);
+        const firstCommand = vscode.commands.get('labCodex.switchConnection')();
+        await quickPickEntered;
+        await vscode.commands.get('labCodex.useAccount')();
+        resolveQuickPick(undefined);
+        await firstCommand;
+      });
+      assert.ok(vscode.warnings.some((message) => message.includes('另一个 Codex 连接')));
+      assert.equal(context.globalState.get('pending-provider-switch-v2'), undefined);
+    } finally {
+      await fs.promises.rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  await t.test('preserves an external config edit made while a switch is being confirmed', async () => {
+    const temporaryRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'codex-config-cas-'));
+    const codexHome = path.join(temporaryRoot, 'codex-home');
+    const officialRoot = await createPatchedOfficialCodex(temporaryRoot);
+    await fs.promises.mkdir(codexHome, { recursive: true });
+    const configPath = path.join(codexHome, 'config.toml');
+    await fs.promises.writeFile(configPath, 'model_provider = "lab_relay"\nexternal = "before"\n', 'utf8');
+    const externalConfig = 'model_provider = "lab_relay"\nexternal = "after"\n';
+    const vscode = baseVscodeMock({
+      getExtension(id) {
+        return id === 'openai.chatgpt'
+          ? { extensionPath: officialRoot, packageJSON: { version: 'fixture' } }
+          : undefined;
+      },
+      settings: {
+        autoReload: false,
+        autoPatchProviderTakeover: false,
+        autoPatchSharedHistory: false,
+        autoPatchMax: false
+      },
+      warningHandler(message) {
+        if (message.includes('必须重载 VS Code 窗口')) {
+          fs.writeFileSync(configPath, externalConfig, 'utf8');
+          return '切换并重载';
+        }
+        return undefined;
+      }
+    });
+    const context = {
+      extensionPath: path.resolve(__dirname, '..'),
+      globalState: createGlobalState(),
+      subscriptions: []
+    };
+
+    try {
+      await loadExtensionWithMock(codexHome, vscode.api, async (extension) => {
+        await extension.activate(context);
+        await vscode.commands.get('labCodex.useAccount')();
+      });
+      assert.equal(await fs.promises.readFile(configPath, 'utf8'), externalConfig);
+      assert.ok(vscode.errors.some((message) => message.includes('操作期间发生变化')));
+      assert.equal(context.globalState.get('pending-provider-switch-v2'), undefined);
+      assert.equal(vscode.executedCommands.some(([command]) => command === 'workbench.action.reloadWindow'), false);
     } finally {
       await fs.promises.rm(temporaryRoot, { recursive: true, force: true });
     }

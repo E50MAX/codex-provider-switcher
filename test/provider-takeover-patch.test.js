@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   PROVIDER_TAKEOVER_PATCH_MARKER,
+  SIXTH_PROVIDER_TAKEOVER_PATCH_MARKER,
   FIFTH_PROVIDER_TAKEOVER_PATCH_MARKER,
   INTERMEDIATE_PROVIDER_TAKEOVER_PATCH_MARKER,
   PREVIOUS_PROVIDER_TAKEOVER_PATCH_MARKER,
@@ -37,6 +38,17 @@ const SEMICOLON_AWAIT_SOURCE = ORIGINAL_SOURCE.replace(
   'let ne=()=>null;re=await te;let ie=null;'
 );
 
+const COMPLETED_PARAMS_COMMA_SOURCE = ORIGINAL_SOURCE.replace(
+  'let te=e.sendRequest(`thread/resume`,{threadId:n,history:null,model:null,modelProvider:H.modelProvider,cwd:`/workspace`},V);',
+  [
+    'const se={completeRequest:e=>e};',
+    'let ve={threadId:n,history:null,model:null,modelProvider:H.modelProvider,cwd:`/workspace`};',
+    've.config=H.config;',
+    'let ye=se.completeRequest(ve),be=ye.config??null;',
+    'let te=e.sendRequest(`thread/resume`,ye,V),parallelResume=be;'
+  ].join('')
+);
+
 function compilePatchedFixture() {
   const result = patchProviderTakeoverSource(ORIGINAL_SOURCE);
   assert.equal(result.status, 'patched');
@@ -49,7 +61,7 @@ function compilePatchedFixture() {
   );
   assert.equal(
     result.source.match(new RegExp(PROVIDER_TAKEOVER_BLOCK_MARKER.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'))?.length,
-    19,
+    20,
     'every Provider Switcher fail-closed path must use the dedicated resume-block marker'
   );
   return {
@@ -58,11 +70,29 @@ function compilePatchedFixture() {
   };
 }
 
-function fifthPatchedFixtureSource() {
+function sixthPatchedFixtureSource() {
   const current = patchProviderTakeoverSource(ORIGINAL_SOURCE);
   assert.equal(current.status, 'patched');
   return current.source
     .split(PROVIDER_TAKEOVER_PATCH_MARKER)
+    .join(SIXTH_PROVIDER_TAKEOVER_PATCH_MARKER)
+    .replace(
+      'current OpenAI authentication state could not be read; sending is blocked',
+      'current ChatGPT account state could not be read; sending is blocked'
+    )
+    .replace(
+      [
+        'let codexProviderSwitcherOpenAIAccountType=codexProviderSwitcherAccountReadResult?.account?.type??null;',
+        `if(codexProviderSwitcherOpenAIAccountType===null)throw Error(\`${SIXTH_PROVIDER_TAKEOVER_PATCH_MARKER} ${PROVIDER_TAKEOVER_BLOCK_MARKER} effective provider is openai but no OpenAI login is active; sign in with ChatGPT or an OpenAI API key, or switch to the custom API and reload; sending is blocked\`);`,
+        `if(![\`chatgpt\`,\`apiKey\`].includes(codexProviderSwitcherOpenAIAccountType))throw Error(\`${SIXTH_PROVIDER_TAKEOVER_PATCH_MARKER} ${PROVIDER_TAKEOVER_BLOCK_MARKER} unsupported OpenAI login type; sending is blocked\`);`
+      ].join(''),
+      `if(codexProviderSwitcherAccountReadResult?.account?.type!==\`chatgpt\`)throw Error(\`${SIXTH_PROVIDER_TAKEOVER_PATCH_MARKER} ${PROVIDER_TAKEOVER_BLOCK_MARKER} no ChatGPT account is signed in; sending is blocked\`);`
+    );
+}
+
+function fifthPatchedFixtureSource() {
+  return sixthPatchedFixtureSource()
+    .split(SIXTH_PROVIDER_TAKEOVER_PATCH_MARKER)
     .join(FIFTH_PROVIDER_TAKEOVER_PATCH_MARKER)
     .split(`${FIFTH_PROVIDER_TAKEOVER_PATCH_MARKER} ${PROVIDER_TAKEOVER_BLOCK_MARKER} `)
     .join(`${FIFTH_PROVIDER_TAKEOVER_PATCH_MARKER} already has an active writer; `)
@@ -393,6 +423,25 @@ test('provider takeover patch', async (t) => {
     );
   });
 
+  await t.test('allows account history with OpenAI API key authentication', async () => {
+    const { resume } = compilePatchedFixture();
+    const manager = managerWithResponses([response('openai')], {
+      effectiveProvider: null,
+      accountResult: {
+        account: { type: 'apiKey' },
+        requiresOpenaiAuth: true
+      }
+    });
+
+    const result = await resume(manager, 'thread-1', { modelProvider: 'lab_relay' }, {});
+    assert.equal(result.re.modelProvider, 'openai');
+    assert.equal(manager.state.modelProvider, 'openai');
+    assert.deepEqual(
+      manager.calls.map((call) => call.method),
+      ['config/read', 'model/list', 'account/read', 'thread/resume']
+    );
+  });
+
   await t.test('blocks account history while signed out', async () => {
     const { resume } = compilePatchedFixture();
     const manager = managerWithResponses([], {
@@ -402,7 +451,27 @@ test('provider takeover patch', async (t) => {
 
     await assert.rejects(
       resume(manager, 'thread-1', { modelProvider: 'openai' }, {}),
-      /no ChatGPT account is signed in; sending is blocked/
+      /effective provider is openai but no OpenAI login is active;.*switch to the custom API and reload; sending is blocked/
+    );
+    assert.deepEqual(
+      manager.calls.map((call) => call.method),
+      ['config/read', 'model/list', 'account/read']
+    );
+  });
+
+  await t.test('blocks unknown OpenAI authentication types', async () => {
+    const { resume } = compilePatchedFixture();
+    const manager = managerWithResponses([], {
+      effectiveProvider: null,
+      accountResult: {
+        account: { type: 'futureAuth' },
+        requiresOpenaiAuth: true
+      }
+    });
+
+    await assert.rejects(
+      resume(manager, 'thread-1', { modelProvider: 'openai' }, {}),
+      /unsupported OpenAI login type; sending is blocked/
     );
     assert.deepEqual(
       manager.calls.map((call) => call.method),
@@ -419,7 +488,7 @@ test('provider takeover patch', async (t) => {
 
     await assert.rejects(
       resume(manager, 'thread-1', { modelProvider: 'openai' }, {}),
-      /current ChatGPT account state could not be read; sending is blocked/
+      /current OpenAI authentication state could not be read; sending is blocked/
     );
     assert.deepEqual(
       manager.calls.map((call) => call.method),
@@ -503,6 +572,28 @@ test('provider takeover patch', async (t) => {
     assert.equal(result.source.includes('re=await te();'), true);
     assert.equal(verifyPatchedProviderTakeoverSource(result.source), true);
     assert.equal(patchProviderTakeoverSource(result.source).status, 'already-patched');
+  });
+
+  await t.test('supports completed resume params and a following declarator', async () => {
+    const result = patchProviderTakeoverSource(COMPLETED_PARAMS_COMMA_SOURCE);
+
+    assert.equal(result.status, 'patched');
+    assert.equal(result.replacementCount, 4);
+    assert.equal(result.source.includes('},parallelResume=be;'), true);
+    assert.equal(result.source.includes('let codexProviderSwitcherResumeParams=ye;'), true);
+    assert.equal(result.source.includes('re=await te(),'), true);
+    assert.equal(verifyPatchedProviderTakeoverSource(result.source), true);
+    assert.equal(patchProviderTakeoverSource(result.source).status, 'already-patched');
+
+    const resume = new Function(result.source)();
+    const manager = managerWithResponses([response('lab_relay')]);
+    const resumed = await resume(manager, 'thread-1', { modelProvider: 'openai' }, {});
+    assert.equal(resumed.re.modelProvider, 'lab_relay');
+    assert.equal(manager.state.modelProvider, 'lab_relay');
+    assert.deepEqual(
+      manager.calls.map((call) => call.method),
+      ['config/read', 'model/list', 'thread/resume']
+    );
   });
 
   await t.test('falls back from stale thread selections to compatible current settings', async () => {
@@ -706,7 +797,22 @@ test('provider takeover patch', async (t) => {
     ]);
   });
 
-  await t.test('upgrades the verified v5 patch to distinct resume-block diagnostics', () => {
+  await t.test('upgrades the verified v6 patch to support both OpenAI login methods', () => {
+    const sixthSource = sixthPatchedFixtureSource();
+    assert.equal(sixthSource.includes(SIXTH_PROVIDER_TAKEOVER_PATCH_MARKER), true);
+    assert.equal(sixthSource.includes(PROVIDER_TAKEOVER_PATCH_MARKER), false);
+    assert.equal(sixthSource.includes('no ChatGPT account is signed in'), true);
+
+    const result = patchProviderTakeoverSource(sixthSource);
+    assert.equal(result.status, 'patched');
+    assert.equal(result.replacementCount, 1);
+    assert.equal(result.source.includes(SIXTH_PROVIDER_TAKEOVER_PATCH_MARKER), false);
+    assert.equal(result.source.includes('`apiKey`'), true);
+    assert.equal(result.source.includes('switch to the custom API and reload'), true);
+    assert.equal(verifyPatchedProviderTakeoverSource(result.source), true);
+  });
+
+  await t.test('upgrades the verified v5 patch to current resume-block diagnostics', () => {
     const fifthSource = fifthPatchedFixtureSource();
     assert.equal(fifthSource.includes(FIFTH_PROVIDER_TAKEOVER_PATCH_MARKER), true);
     assert.equal(fifthSource.includes(PROVIDER_TAKEOVER_PATCH_MARKER), false);
@@ -797,11 +903,32 @@ test('provider takeover patch', async (t) => {
   await t.test('refuses ambiguous or structurally unknown bundles', () => {
     assert.equal(patchProviderTakeoverSource('thread/resume').status, 'unsupported');
     assert.equal(
+      patchProviderTakeoverSource(
+        COMPLETED_PARAMS_COMMA_SOURCE.replace('.completeRequest(ve)', '.finishRequest(ve)')
+      ).status,
+      'unsupported'
+    );
+    assert.equal(
+      patchProviderTakeoverSource(
+        COMPLETED_PARAMS_COMMA_SOURCE.replace(
+          'let te=e.sendRequest(`thread/resume`,ye,V),parallelResume=be;',
+          'let te=e.sendRequest(`thread/resume`,ye,V),runParallel();'
+        )
+      ).status,
+      'unsupported'
+    );
+    assert.equal(
       patchProviderTakeoverSource(`${ORIGINAL_SOURCE}${ORIGINAL_SOURCE}`).status,
       'unsupported'
     );
     assert.equal(
       patchProviderTakeoverSource(`${ORIGINAL_SOURCE}${PROVIDER_TAKEOVER_PATCH_MARKER}`).status,
+      'unsupported'
+    );
+    assert.equal(
+      patchProviderTakeoverSource(
+        `${ORIGINAL_SOURCE}${SIXTH_PROVIDER_TAKEOVER_PATCH_MARKER}`
+      ).status,
       'unsupported'
     );
     assert.equal(

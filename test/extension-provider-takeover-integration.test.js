@@ -7,6 +7,9 @@ const os = require('node:os');
 const path = require('node:path');
 const Module = require('node:module');
 const {
+  PROVIDER_TAKEOVER_PATCH_MARKER,
+  SIXTH_PROVIDER_TAKEOVER_PATCH_MARKER,
+  PROVIDER_TAKEOVER_BLOCK_MARKER,
   patchProviderTakeoverConversationUiSource,
   patchProviderTakeoverResumeUiSource,
   patchProviderTakeoverSource
@@ -24,6 +27,26 @@ const ORIGINAL_PROVIDER_SOURCE = [
   'return{re,ie,ne:ne()}',
   '}'
 ].join('');
+
+function sixthPatchedProviderSource() {
+  const current = patchProviderTakeoverSource(ORIGINAL_PROVIDER_SOURCE);
+  assert.equal(current.status, 'patched');
+  return current.source
+    .split(PROVIDER_TAKEOVER_PATCH_MARKER)
+    .join(SIXTH_PROVIDER_TAKEOVER_PATCH_MARKER)
+    .replace(
+      'current OpenAI authentication state could not be read; sending is blocked',
+      'current ChatGPT account state could not be read; sending is blocked'
+    )
+    .replace(
+      [
+        'let codexProviderSwitcherOpenAIAccountType=codexProviderSwitcherAccountReadResult?.account?.type??null;',
+        `if(codexProviderSwitcherOpenAIAccountType===null)throw Error(\`${SIXTH_PROVIDER_TAKEOVER_PATCH_MARKER} ${PROVIDER_TAKEOVER_BLOCK_MARKER} effective provider is openai but no OpenAI login is active; sign in with ChatGPT or an OpenAI API key, or switch to the custom API and reload; sending is blocked\`);`,
+        `if(![\`chatgpt\`,\`apiKey\`].includes(codexProviderSwitcherOpenAIAccountType))throw Error(\`${SIXTH_PROVIDER_TAKEOVER_PATCH_MARKER} ${PROVIDER_TAKEOVER_BLOCK_MARKER} unsupported OpenAI login type; sending is blocked\`);`
+      ].join(''),
+      `if(codexProviderSwitcherAccountReadResult?.account?.type!==\`chatgpt\`)throw Error(\`${SIXTH_PROVIDER_TAKEOVER_PATCH_MARKER} ${PROVIDER_TAKEOVER_BLOCK_MARKER} no ChatGPT account is signed in; sending is blocked\`);`
+    );
+}
 
 function createGlobalState(initialValues = {}) {
   const values = new Map(Object.entries(initialValues));
@@ -130,7 +153,7 @@ function createVscodeMock(fixture) {
         setStatusBarMessage() {},
         async showWarningMessage(message) {
           warnings.push(message);
-          return message.includes('接管账户 / API 的旧会话')
+          return message.includes('接管 OpenAI / 自定义 API 的旧会话')
             ? '启用旧会话切换并重载'
             : undefined;
         },
@@ -219,6 +242,24 @@ test('provider takeover activation repair', async (t) => {
         patchProviderTakeoverConversationUiSource(conversationUiSource).status,
         'already-patched'
       );
+      assert.equal(vscode.warnings.length, 0);
+    } finally {
+      await fs.promises.rm(fixture.temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  await t.test('upgrades an installed v6 provider patch without asking for consent again', async () => {
+    const fixture = await createFixture();
+    await fs.promises.writeFile(fixture.assetPath, sixthPatchedProviderSource(), 'utf8');
+    const globalState = createGlobalState({ 'provider-takeover-patch-consent-v1': true });
+    const vscode = createVscodeMock(fixture);
+    try {
+      await activateFixture(fixture, globalState, vscode);
+      const source = await fs.promises.readFile(fixture.assetPath, 'utf8');
+
+      assert.equal(patchProviderTakeoverSource(source).status, 'already-patched');
+      assert.equal(source.includes(SIXTH_PROVIDER_TAKEOVER_PATCH_MARKER), false);
+      assert.equal(source.includes('`apiKey`'), true);
       assert.equal(vscode.warnings.length, 0);
     } finally {
       await fs.promises.rm(fixture.temporaryRoot, { recursive: true, force: true });

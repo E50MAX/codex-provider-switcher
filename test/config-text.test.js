@@ -2,7 +2,11 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { removeManagedBlock, setTopLevelValue } = require('../lib/config-text');
+const {
+  readTopLevelStringValue,
+  removeManagedBlock,
+  setTopLevelValue
+} = require('../lib/config-text');
 
 const managedBegin = '# >>> codex-provider-switcher: lab_relay >>>';
 const managedEnd = '# <<< codex-provider-switcher: lab_relay <<<';
@@ -75,5 +79,50 @@ test('refuses missing, reversed, or duplicate managed markers', () => {
       managedEnd
     ),
     /标记异常/
+  );
+});
+
+test('reads quoted top-level strings with valid inline comments', () => {
+  const config = [
+    'model_provider = "lab_relay" # active relay',
+    "model = 'gpt-5.6-sol' # literal string",
+    'review_model = "model#variant" # the hash inside the string is data',
+    'escaped = "line\\u002dvalue"',
+    '',
+    '[features]',
+    'model_provider = "nested"'
+  ].join('\n');
+
+  assert.equal(readTopLevelStringValue(config, 'model_provider'), 'lab_relay');
+  assert.equal(readTopLevelStringValue(config, 'model'), 'gpt-5.6-sol');
+  assert.equal(readTopLevelStringValue(config, 'review_model'), 'model#variant');
+  assert.equal(readTopLevelStringValue(config, 'escaped'), 'line-value');
+  assert.equal(readTopLevelStringValue(config, 'missing'), undefined);
+});
+
+test('refuses ambiguous or malformed top-level string values', () => {
+  assert.throws(
+    () => readTopLevelStringValue('model_provider = lab_relay\n', 'model_provider'),
+    /必须是单行 TOML 字符串/
+  );
+  assert.throws(
+    () => readTopLevelStringValue('model_provider = "lab_relay" trailing\n', 'model_provider'),
+    /无效内容/
+  );
+  assert.throws(
+    () => readTopLevelStringValue(
+      'model_provider = "openai"\nmodel_provider = "lab_relay"\n',
+      'model_provider'
+    ),
+    /重复/
+  );
+  assert.throws(
+    () => setTopLevelValue(
+      'model = "first"\nmodel = "second"\n',
+      'model',
+      'replacement',
+      managedBegin
+    ),
+    /重复/
   );
 });

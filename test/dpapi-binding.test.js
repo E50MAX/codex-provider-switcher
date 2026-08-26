@@ -63,6 +63,27 @@ windowsTest('DPAPI key is bound to the configured HTTPS Base URL', () => {
     assert.equal(read.status, 0, read.stderr);
     assert.equal(read.stdout, apiKey);
 
+    fs.writeFileSync(configPath, [
+      `model_provider = '${providerId}' # active relay`,
+      '',
+      managedBegin,
+      `[model_providers.${providerId}]`,
+      `base_url = ${JSON.stringify(trustedBaseUrl)} # trusted endpoint`,
+      'wire_api = "responses"',
+      managedEnd,
+      ''
+    ].join('\n'));
+    const readCommentedToml = runPowerShell(getScript, [
+      '-SecretPath', secretPath,
+      '-Binding', trustedBaseUrl,
+      '-ConfigPath', configPath,
+      '-ProviderId', providerId
+    ]);
+    assert.equal(readCommentedToml.status, 0, readCommentedToml.stderr);
+    assert.equal(readCommentedToml.stdout, apiKey);
+
+    writeConfig(providerId, trustedBaseUrl);
+
     const replacementApiKey = 'replacement_test_key_0987654321';
     const replace = runPowerShell(
       saveScript,

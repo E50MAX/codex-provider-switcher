@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.3.10
+
+- Supports newer Codex webview bundles that pass completed `thread/resume` parameters through a local variable and place parallel hydration in the same `let` declaration, while retaining strict provenance and call-boundary checks.
+- Accepts both supported local OpenAI authentication types when resuming `openai` Provider history: ChatGPT subscription login and usage-based OpenAI API key login.
+- Keeps signed-out and unknown authentication states fail-closed, while explaining that the effective Provider is still `openai` and telling custom-API users to switch and reload.
+- Automatically upgrades the structurally verified v6 takeover patch so existing 2.3.9 installations receive the authentication fix.
+- Requires a confirmed window reload before saving changes to the currently active custom API, and leaves the endpoint and key unchanged when that confirmation is declined.
+- Refuses all filesystem and Codex-asset mutations in VS Code Remote windows or Codex WSL execution mode, where the Windows DPAPI command and `CODEX_HOME` cannot be proven to match the Codex runtime.
+- Parses valid top-level TOML literal strings and inline comments, reports unmanaged Providers honestly, and keeps duplicate or malformed Provider settings fail-closed.
+- Serializes connection commands and rejects stale `config.toml` writes when another process changes the file during a switch.
+- Continues to recognize an already-installed takeover patch when automatic re-patching is disabled, and keeps commands available with an actionable status when the top-level connection config is malformed.
+- Reloads immediately when the active custom Provider's saved key is deleted, and displays an explicit missing-key status instead of claiming that the API connection is ready.
+
 ## 2.3.9
 
 - Separates Provider Switcher safety-block failures from genuine App Server writer conflicts, so configuration, model-catalog, login-state, and runtime-selection errors are no longer mislabeled as “open in another app.”

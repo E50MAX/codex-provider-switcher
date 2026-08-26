@@ -2,6 +2,8 @@
 
 The extension itself makes no network requests and collects no telemetry.
 
+The current release operates only in a native Windows local VS Code window. It stops before reading or writing the configured Windows `CODEX_HOME` when VS Code Remote is active or when the official Codex WSL execution setting is enabled, because those modes may use a different remote or Linux home directory.
+
 It stores the following data locally under `CODEX_HOME` (normally `~/.codex`):
 
 - the configured HTTPS Base URL and model ID;
@@ -12,7 +14,7 @@ It stores the following data locally under `CODEX_HOME` (normally `~/.codex`):
 
 When custom API mode is active, Codex sends prompts, source context, tool data, and the API Key to the provider selected by the user. Users must review and trust that provider's privacy, retention, and security policies.
 
-Codex stores a Provider on each thread. The extension does not rewrite that database metadata. With explicit consent, its old-thread takeover repair uses the local App Server's read-only `config/read` and `model/list` methods to resolve a compatible Provider, model, reasoning effort, and service tier immediately before resume. In account mode, it also uses `account/read` with `refreshToken: false` and checks only that the returned account type is ChatGPT. It does not compare or store the account's email or identity. It then waits for bounded transient writer-lock handoff and validates the thread identity and complete runtime selection returned while resuming the conversation. Because `thread/unsubscribe` does not immediately unload a thread, the extension does not use an unsubscribe/immediate-resume cycle to claim a selection change. A loaded runtime mismatch is unsubscribed and blocked until a clean window reload; active threads and unverifiable results are likewise blocked rather than silently routed.
+Codex stores a Provider on each thread. The extension does not rewrite that database metadata. With explicit consent, its old-thread takeover repair uses the local App Server's read-only `config/read` and `model/list` methods to resolve a compatible Provider, model, reasoning effort, and service tier immediately before resume. For the OpenAI Provider, it also uses `account/read` with `refreshToken: false` and checks only that the returned account type is the supported `chatgpt` or `apiKey` value. It does not compare or store the account's email, API key, or identity. Signed-out and unknown authentication types are blocked. It then waits for bounded transient writer-lock handoff and validates the thread identity and complete runtime selection returned while resuming the conversation. Because `thread/unsubscribe` does not immediately unload a thread, the extension does not use an unsubscribe/immediate-resume cycle to claim a selection change. A loaded runtime mismatch is unsubscribed and blocked until a clean window reload; active threads and unverifiable results are likewise blocked rather than silently routed.
 
 Switching and validating a Provider does not itself send a model request. When the user sends the next message in an old conversation, Codex may provide retained prompts, source context, image references, and tool output from that conversation to the newly selected Provider or newly signed-in account. Users should review this disclosure before changing to a Provider or account with a different privacy or trust policy.
 

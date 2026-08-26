@@ -61,12 +61,17 @@ $topLevelText = if ($firstTableMatch.Success) {
 else {
     $configText
 }
-$modelProviderPattern = '(?m)^\s*model_provider\s*=\s*(?<value>"(?:\\.|[^"\\])*")\s*$'
+$modelProviderPattern = '(?m)^\s*model_provider\s*=\s*(?:(?<basic>"(?:\\.|[^"\\])*")|''(?<literal>[^'']*)'')\s*(?:#.*)?$'
 $modelProviderMatches = [System.Text.RegularExpressions.Regex]::Matches($topLevelText, $modelProviderPattern)
 if ($modelProviderMatches.Count -ne 1) {
     throw 'Active model provider is missing or ambiguous.'
 }
-$activeProvider = ConvertFrom-Json -InputObject $modelProviderMatches[0].Groups['value'].Value
+$activeProvider = if ($modelProviderMatches[0].Groups['basic'].Success) {
+    ConvertFrom-Json -InputObject $modelProviderMatches[0].Groups['basic'].Value
+}
+else {
+    $modelProviderMatches[0].Groups['literal'].Value
+}
 if (-not [string]::Equals($activeProvider, $ProviderId, [System.StringComparison]::Ordinal)) {
     throw 'Managed provider is not the active model provider.'
 }
@@ -82,7 +87,7 @@ if ($providerMatch.Index -le $managedBeginMatches[0].Index -or
     throw 'Managed provider configuration is outside its integrity markers.'
 }
 
-$baseUrlPattern = '(?m)^\s*base_url\s*=\s*(?<value>"(?:\\.|[^"\\])*")\s*$'
+$baseUrlPattern = '(?m)^\s*base_url\s*=\s*(?<value>"(?:\\.|[^"\\])*")\s*(?:#.*)?$'
 $baseUrlMatches = [System.Text.RegularExpressions.Regex]::Matches($providerMatch.Groups['body'].Value, $baseUrlPattern)
 if ($baseUrlMatches.Count -ne 1) {
     throw 'Managed provider Base URL was not found or is ambiguous.'
