@@ -167,7 +167,7 @@
     "Logo.png"
   ],
   "devDependencies": {
-    "@azure/identity": "4.13.1",
+    "@azure/identity": "4.13.2",
     "@vscode/vsce": "3.9.2"
   }
 }
