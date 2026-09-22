@@ -168,6 +168,6 @@
   ],
   "devDependencies": {
     "@azure/identity": "4.13.1",
-    "@vscode/vsce": "3.9.2"
+    "@vscode/vsce": "4.0.0"
   }
 }
